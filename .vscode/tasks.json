@@ -1,0 +1,36 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "1. Build Example_1",
+            "type": "shell",
+            "command": "make -C ${workspaceFolder}/Example_1",
+            "group": "build"
+        },
+        {
+            "label": "2. Deploy Example_1",
+            "type": "shell",
+            "command": "scp -r ${workspaceFolder}/Example_1/bin pi@192.168.137.3:/home/pi/Example_1/",
+            "problemMatcher": [],
+            "group": "build"
+        },
+        {
+            "label": "3. Remote Debug Example_1",
+            "type": "shell",
+            "command": "ssh pi@192.168.137.3 'pkill gdbserver; cd /home/pi/Example_1/bin && gdbserver :2345 ./rbp'",
+            "problemMatcher": [],
+            "group": "build"
+        },
+        {
+            "label": "FULL: Build + Deploy + Remote Debug",
+            "dependsOn": [
+                "1. Build Example_1",
+                "2. Deploy Example_1",
+                "3. Remote Debug Example_1"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "group": "build"
+        }
+    ]
+}

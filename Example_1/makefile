@@ -54,16 +54,16 @@ LFLAGS += -lgstapp-1.0 -lgstvideo-1.0 -lgstbase-1.0 -lgstreamer-1.0 -ludev -lfon
 
 all: rbp
 
-rbp: $(PROJECT_ROOT)/main.o $(PROJECT_ROOT)/ofApp.o
-	$(CC) -o $(PROJECT_ROOT)/rbp $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o $(LIB_A) $(LFLAGS)
+rbp: $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o
+	$(CC) -o $(PROJECT_ROOT)/bin/rbp $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o $(LIB_A) $(LFLAGS)
 
-$(PROJECT_ROOT)/main.o: $(PROJECT_ROOT)/src/main.cpp
+$(PROJECT_ROOT)/build/main.o: $(PROJECT_ROOT)/src/main.cpp
 	$(CC) -c $(PROJECT_ROOT)/src/main.cpp -o $(PROJECT_ROOT)/build/main.o $(CFLAGS)
 
-$(PROJECT_ROOT)/ofApp.o: $(PROJECT_ROOT)/src/ofApp.h $(PROJECT_ROOT)/src/ofApp.cpp
+$(PROJECT_ROOT)/build/ofApp.o: $(PROJECT_ROOT)/src/ofApp.h $(PROJECT_ROOT)/src/ofApp.cpp
 	$(CC) -c $(PROJECT_ROOT)/src/ofApp.cpp -o $(PROJECT_ROOT)/build/ofApp.o $(CFLAGS)
 
 clean:
 	rm -f $(PROJECT_ROOT)/build/main.o
 	rm -f $(PROJECT_ROOT)/build/ofApp.o
-	rm -f $(PROJECT_ROOT)/rbp
+	rm -f $(PROJECT_ROOT)/bin/rbp
