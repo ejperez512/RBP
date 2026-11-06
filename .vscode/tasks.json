@@ -10,23 +10,23 @@
         {
             "label": "2. Deploy Example_1",
             "type": "shell",
-            "command": "scp -r ${workspaceFolder}/Example_1/bin pi@192.168.137.3:/home/pi/Example_1/",
+            "command": "scp ${workspaceFolder}/Example_1/bin/rbp pi@192.168.137.3:/home/pi/RBP/Example_1/bin ; ssh pi@192.168.137.3 'chmod +x /home/pi/RBP/Example_1/bin/rbp'",
             "problemMatcher": [],
             "group": "build"
         },
         {
-            "label": "3. Remote Debug Example_1",
+            "label": "3. DBGServer Example_1",
             "type": "shell",
-            "command": "ssh pi@192.168.137.3 'pkill gdbserver; cd /home/pi/Example_1/bin && gdbserver :2345 ./rbp'",
+            "command": "ssh pi@192.168.137.3 'pkill gdbserver; cd /home/pi/RBP/Example_1/bin; gdbserver :2345 ./rbp'",
             "problemMatcher": [],
             "group": "build"
         },
         {
-            "label": "FULL: Build + Deploy + Remote Debug",
+            "label": "FULL: Build + Deploy + DBGServer Example_1",
             "dependsOn": [
                 "1. Build Example_1",
                 "2. Deploy Example_1",
-                "3. Remote Debug Example_1"
+                "3. DBGServer Example_1"
             ],
             "dependsOrder": "sequence",
             "problemMatcher": [],

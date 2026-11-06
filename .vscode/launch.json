@@ -5,11 +5,12 @@
             "name": "Debug Raspberry Pi (gdbserver)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/Example_1/rbp",
+            "program": "${workspaceFolder}/Example_1/bin/rbp",
+            "args": ["2048", "0"],
             "cwd": "${workspaceFolder}/Example_1",
             "MIMode": "gdb",
             "miDebuggerPath": "aarch64-linux-gnu-gdb",
-            "miDebuggerServerAddress": "192.168.137.3:1234",
+            "miDebuggerServerAddress": "192.168.137.3:2345",
             "stopAtEntry": false,
             "externalConsole": false
         }
