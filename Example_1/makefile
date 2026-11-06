@@ -55,15 +55,17 @@ LFLAGS += -lgstapp-1.0 -lgstvideo-1.0 -lgstbase-1.0 -lgstreamer-1.0 -ludev -lfon
 all: rbp
 
 rbp: $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o
+	@mkdir -p $(PROJECT_ROOT)/bin
 	$(CC) -o $(PROJECT_ROOT)/bin/rbp $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o $(LIB_A) $(LFLAGS)
 
 $(PROJECT_ROOT)/build/main.o: $(PROJECT_ROOT)/src/main.cpp
+	@mkdir -p $(PROJECT_ROOT)/build
 	$(CC) -c $(PROJECT_ROOT)/src/main.cpp -o $(PROJECT_ROOT)/build/main.o $(CFLAGS)
 
 $(PROJECT_ROOT)/build/ofApp.o: $(PROJECT_ROOT)/src/ofApp.h $(PROJECT_ROOT)/src/ofApp.cpp
+	@mkdir -p $(PROJECT_ROOT)/build
 	$(CC) -c $(PROJECT_ROOT)/src/ofApp.cpp -o $(PROJECT_ROOT)/build/ofApp.o $(CFLAGS)
 
 clean:
-	rm -f $(PROJECT_ROOT)/build/main.o
-	rm -f $(PROJECT_ROOT)/build/ofApp.o
-	rm -f $(PROJECT_ROOT)/bin/rbp
+	rm -rf $(PROJECT_ROOT)/build
+	rm -rf $(PROJECT_ROOT)/bin
