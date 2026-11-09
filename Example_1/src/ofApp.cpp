@@ -166,7 +166,7 @@ void ofApp::setup() {
 	// --- SOURCE WAV
 
 	std::cout << std::endl;
-	std::cout << "--- LOADING SOURCEFILES ---" << std::endl;
+	std::cout << "--- LOADING SOURCE FILES ---" << std::endl;
 	std::cout << std::endl;
 
 	// Load Source wave
