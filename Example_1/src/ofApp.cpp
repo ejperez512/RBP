@@ -61,8 +61,12 @@ void ofApp::setup() {
 	int azi, ele, dst;
 	int cont_src_steps;
 
+	ofSetLogLevel(OF_LOG_SILENT);
+
 	std::cout << std::endl;
-	std::cout << "Enter buffer size (default is 2048): ";
+	std::cout << "--- BUFFER SIZE ---" << std::endl;
+	std::cout << std::endl;
+	std::cout << "    Enter buffer size (default is 2048): ";
 	std::cin >> buffer_size;
 
 	if (buffer_size <= 0) {
@@ -70,9 +74,11 @@ void ofApp::setup() {
 	} // if (buffer_size <= 0)
 	
 	std::cout << std::endl;
-	std::cout << "This application uses a 'speech' source and a configurable number of 'steps' sources at random positions." << std::endl;
+	std::cout << "--- NUMBER OF SOURCES ---" << std::endl;
 	std::cout << std::endl;
-	std::cout << "Number of 'steps' sources (0.." << MAX_SRC-1 << "): ";
+	std::cout << "    This application uses a 'speech' source and a configurable number of 'steps' sources at random positions." << std::endl;
+	std::cout << std::endl;
+	std::cout << "    Number of 'steps' sources (0.." << MAX_SRC-1 << "): ";
 	std::cin >> num_src_steps;
 
 	if (num_src_steps < 0) {
@@ -83,7 +89,7 @@ void ofApp::setup() {
 		num_src_steps = MAX_SRC-1;
 	} // if (num_src_steps > MAX_SRC-1)
 
-	std::cout << endl;
+	std::cout << std::endl;
 
 	// #################### BRT SOURCE CODE BEGIN ####################
 	
@@ -115,6 +121,10 @@ void ofApp::setup() {
 	brtManager.EndSetup();
 
 	// Load HRTF
+
+	std::cout << "--- LOADING SOFA AND ILD FILES ---" << std::endl;
+	std::cout << std::endl;
+
 	std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf = std::make_shared<BRTServices::CSphericalInterpolatedFIRTable>();
 	LoadSofaFile(HRTF_FILE, hrtf);
 	// Set HRTF
@@ -126,6 +136,10 @@ void ofApp::setup() {
 	listenerBRT->SetNearFieldCompensationFilters(sosFilter);
 
 	// === MULTISOURCES ===
+
+	std::cout << std::endl;
+	std::cout << "--- CREATING SOURCES ---" << std::endl;
+	std::cout << std::endl;
 
 	// --- SOURCE SPEECH [OMNIDIRECTIONAL]
 
@@ -147,9 +161,13 @@ void ofApp::setup() {
 	Common::CTransform sourceBRT_pos = Common::CTransform();
 	sourceBRT_pos.SetPosition(Spherical2Cartesians(SRC_SPEECH_AZIMUTH, SRC_SPEECH_ELEVATION, SRC_SPEECH_DISTANCE));
 	sourcesBRT[0]->SetSourceTransform(sourceBRT_pos);
-	printf("Source 'speech'      position: [AZI: % 04d ; ELE: % 03d ; DST: %d]\n", SRC_SPEECH_AZIMUTH, SRC_SPEECH_ELEVATION, SRC_SPEECH_DISTANCE);
+	std::cout << "    Source 'speech'      position: [AZI: " << SRC_SPEECH_AZIMUTH << " ; ELE: " << SRC_SPEECH_ELEVATION << " ; DST: " << SRC_SPEECH_DISTANCE << "]" << std::endl;
 
 	// --- SOURCE WAV
+
+	std::cout << std::endl;
+	std::cout << "--- LOADING SOURCEFILES ---" << std::endl;
+	std::cout << std::endl;
 
 	// Load Source wave
 	LoadWav(samplesVectorSources[0], SRC_SPEECH_FILE);
@@ -179,7 +197,7 @@ void ofApp::setup() {
 		dst = RandomNumber(1, 5);
 		sourceNBRT_pos.SetPosition(Spherical2Cartesians(azi, ele, dst));
 		sourcesBRT[cont_src_steps+1]->SetSourceTransform(sourceNBRT_pos);
-		printf("Source 'steps' [#%02d] position: [AZI: % 04d ; ELE: % 03d ; DST: %d]\n", cont_src_steps+1, azi, ele, dst);
+		std::cout << "    Source 'steps' [#" << std::setw(2) << std::setfill('0') << cont_src_steps+1 << "] position: [AZI: " << std::setw(4) << std::setfill(' ') << azi << " ; ELE: " << std::setw(3) << std::setfill(' ') << ele << " ; DST: " << dst << "]" << std::endl;
 
 		// --- SOURCE WAV
 
@@ -203,15 +221,29 @@ void ofApp::setup() {
 
 } // void ofApp::setup()
 
+// ==================== ofApp::exit ====================
+
+void ofApp::exit() {
+    systemSoundStream.close();
+    systemSoundStream.stop();
+} // void ofApp::exit()
+
 // ==================== ofApp::AudioSetup ====================
 
 void ofApp::AudioSetup(void) {
-	std::vector<ofSoundDevice> deviceList;
+    int bak = dup(STDERR_FILENO);
+    int nullFd = open("/dev/null", O_WRONLY);
+    dup2(nullFd, STDERR_FILENO);
+	
+    std::vector<ofSoundDevice> deviceList;
+    systemSoundStream.close();
+    deviceList = systemSoundStream.getDeviceList();
 
-	systemSoundStream.close();
-	deviceList = systemSoundStream.getDeviceList();
+	dup2(bak, STDERR_FILENO);
 
 	int deviceId = GetAudioDeviceIndex(deviceList);
+
+	dup2(nullFd, STDERR_FILENO);
 
 	if (deviceId >= 0) {
 		systemSoundStream.setDevice(deviceList[deviceId]);
@@ -225,14 +257,19 @@ void ofApp::AudioSetup(void) {
 			buffer_size,
 			4
 		);
-		std::cout << endl;
-		std::cout << "Device selected: " << dev.name << " (ID: " << dev.deviceID << ")" << std::endl;
 
-	}
+	} // if (deviceId >= 0)
+
 	else {
 		std::cout << "Could not find any usable sound Device" << std::endl;
-	}
+	} // else: if (deviceId >= 0)
 
+	dup2(bak, STDERR_FILENO);
+    close(bak);
+    close(nullFd);
+
+	std::cout << std::endl;
+	std::cout << "PRESS <CTRL+C> TO QUIT" << std::endl;
 } // void ofApp::AudioSetup(void)
 
 // ==================== ofApp::audioOut ====================
@@ -259,26 +296,26 @@ void ofApp::audioOut(float *outputBuffer, int bufferSize, int nChannels) {
 
 int GetAudioDeviceIndex(std::vector<ofSoundDevice> list) {
 	int numberOfAudioDevices = list.size();
-	std::cout << endl;
-	std::cout << "LIST OF AVAILABLE DEVICES:" << std::endl;
-	std::cout << "--------------------------" << std::endl;
+	std::cout << std::endl;
+	std::cout << "--- DEVICES ---" << std::endl;
+	std::cout << std::endl;
 
 	for (int i = 0; i < numberOfAudioDevices; i++) {
-		std::cout << "DEVICE '" << char('A'+i) << "': " << list[i].name << " (ID: " << list[i].deviceID << ")";
+		std::cout << "    DEVICE '" << char('A'+i) << "': " << list[i].name << " (ID: " << list[i].deviceID << ")";
 
 		if (list[i].outputChannels == 0) {
-			std::cout << " [NO OUTPUT DEVICE!]";
-		}
+			std::cout << "[NO OUTPUT DEVICE!]";
+		} // if (list[i].outputChannels == 0)
 
 		std::cout << std::endl;
-	}
+	} // for (int i = 0; i < numberOfAudioDevices; i++)
 	
 	char selectedAudioDevice_key;
 	int selectedAudioDevice;
 
 	do {
 		std::cout << std::endl;
-		std::cout << "Please choose which audio output you wish to use: ";
+		std::cout << "    Please choose which audio output you wish to use: ";
 		std::cin >> selectedAudioDevice_key;
 		selectedAudioDevice_key = toupper(selectedAudioDevice_key);
 		std::cin.clear();
@@ -291,21 +328,21 @@ int GetAudioDeviceIndex(std::vector<ofSoundDevice> list) {
 
 		if ((dev.outputChannels >= 0) && c == selectedAudioDevice) {
 			return c;
-		}
+		} // if ((dev.outputChannels >= 0) && c == selectedAudioDevice)
 
-	}
+	} // for (int c = 0; c < numberOfAudioDevices; c++)
 
 	for (int c = 0; c < numberOfAudioDevices; c++) {
 		ofSoundDevice &dev = list[c];
 
 		if ((dev.outputChannels >= 0) && dev.isDefaultOutput) {
 			return c;
-		}
+		} // if ((dev.outputChannels >= 0) && dev.isDefaultOutput)
 
-	}
+	} // for (int c = 0; c < numberOfAudioDevices; c++)
 
 	return -1;
-}
+} // int GetAudioDeviceIndex(std::vector<ofSoundDevice> list)
 
 // ==================== LoadWav ====================
 
@@ -316,8 +353,13 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 	} wavHeader;
 
 	FILE* wavFile = fopen(stringIn, "rb");
-	if (!wavFile) return;
 
+	if (!wavFile) {
+		std::cout << "    Error loading WAV file [" << stringIn << "]" << std::endl;
+		return;
+	} // if (!wavFile)
+
+	std::cout << "    Loading WAV File [" << stringIn << "]: ";
 	fread(&wavHeader, sizeof(wavHeader), 1, wavFile);
 	fseek(wavFile, sizeof(wavHeader), SEEK_SET);
 
@@ -331,8 +373,9 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 	fread(byteSample, 1, 2 * samplesCount, wavFile);
 	fclose(wavFile);
 
-	for (int i = 0; i < samplesCount; i++)
+	for (int i = 0; i < samplesCount; i++) {
 		sample[i] = int16_t(byteSample[2 * i] | byteSample[2 * i + 1] << 8);
+	} // for (int i = 0; i < samplesCount; i++)
 	
 	samplesVector.reserve(samplesCount);
 
@@ -341,7 +384,9 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 
 	delete[] sample;
 	delete[] byteSample;
-}
+
+	std::cout << "successfull!" << std::endl; 
+} // void LoadWav(std::vector<float> &samplesVector, const char *stringIn)
 
 // ==================== LoadSofaFile ====================
 
@@ -352,29 +397,29 @@ bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSp
 	int sampleRateInSOFAFile = sofaReader.GetSampleRateFromSofa(_filePath);
 
 	if (sampleRateInSOFAFile == -1) {
-		std::cout << ("Error loading HRTF Sofa file") << std::endl;
+		std::cout << "    Error loading SOFA file [" << _filePath << "]" << std::endl;
 		return false;
-	}
+	} // if (sampleRateInSOFAFile == -1)
 
 	if (globalParameters.GetSampleRate() != sampleRateInSOFAFile) {
-		std::cout << "The sample rate in HRTF SOFA file doesn't match the configuration." << std::endl;
+		std::cout << "    The sample rate in SOFA file doesn't match the configuration." << std::endl;
 		return false;
-	}
+	} // if (globalParameters.GetSampleRate() != sampleRateInSOFAFile)
 
-	std::cout << std::endl << "Loadind HRTF SOFA File....." << std::endl << std::endl;
+	std::cout << "   Loading SOFA File [" << _filePath << "]: ";
 	bool result = sofaReader.ReadHRTFFromSofa(_filePath, "", hrtf, HRTF_RESAMPLING_STEP, BRTServices::TEXTRAPOLATION_METHOD::nearest_point);
 
 	if (result) {
-		std::cout << ("HRTF Sofa file loaded successfully.") << std::endl;            
+		std::cout << "successfull!" << std::endl;            
 		return true;
-	}
+	} // if (result)
 
 	else {
-		std::cout << ("Error loading HRTF") << std::endl;
+		std::cout << "ERROR!" << std::endl;
 		return false;
-	}
+	} // else: if (result)
 	
-}
+} // bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf)
 
 // ==================== LoadILD ====================
 
@@ -385,29 +430,29 @@ bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSO
 	int sampleRateInSOFAFile = sofaReader.GetSampleRateFromSofa(_ildFilePath);
 
 	if (sampleRateInSOFAFile == -1) {
-		std::cout << ("Error loading ILD Sofa file") << std::endl;
+		std::cout << "    Error loading ILD file [" << _ildFilePath << "]" << std::endl;
 		return false;
-	}
+	} // if (sampleRateInSOFAFile == -1)
 
 	if (globalParameters.GetSampleRate() != sampleRateInSOFAFile) {
-		std::cout << "The sample rate in ILD SOFA file" << std::endl;
+		std::cout << "    The sample rate in ILD file doesn't match the configuration." << std::endl;
 		return false;
-	}
+	} // if (globalParameters.GetSampleRate() != sampleRateInSOFAFile)
 	
-	std::cout << std::endl << "Loadind SOS File....." << std::endl;
+	std::cout << "   Loading ILD File [" << _ildFilePath << "]: ";
 	bool result = sofaReader.ReadSOSFiltersFromSofa(_ildFilePath, _sosFilter);
 
 	if (result) {
-		std::cout << "ILD Sofa file loaded successfully: " << std::endl;            
+		std::cout << "successfull!" << std::endl;            
 		return true;
-	}
+	} // if (result)
 
 	else {
-		std::cout << "Error loading HRTF" << std::endl;
+		std::cout << "ERROR!" << std::endl;
 		return false;
-	}
+	} // else: if (result)
 
-}
+} // bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter)
 
 // ==================== audioProcess ====================
 
@@ -426,20 +471,20 @@ void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int buffer
 	for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++) {
 		sourceInput[cont_src_steps+1] = CMonoBuffer<float> (bufferSize);
 		FillBuffer(sourceInput[cont_src_steps+1], wavSamplePositionSourceN, positionEndFrameSourceN, samplesVectorSources[cont_src_steps+1]);
-	}
+	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
 
 	sourcesBRT[0]->SetBuffer(sourceInput[0]);
 
 	for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++) {
 		sourcesBRT[cont_src_steps+1]->SetBuffer(sourceInput[cont_src_steps+1]);
-	}
+	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
 
 	brtManager.ProcessAll();
 	listenerBRT->GetBuffers(bufferProcessed.left, bufferProcessed.right);
 
 	bufferOutput.left += bufferProcessed.left;
 	bufferOutput.right += bufferProcessed.right;
-}
+} // void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize)
 
 // ==================== FillBuffer ====================
 
@@ -448,7 +493,7 @@ void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int
 
 	if (position >= samplesVector.size()) {
 		position = 0;
-	}
+	} // if (position >= samplesVector.size())
 
 	endFrame = position + output.size() - 1;
 
@@ -456,15 +501,15 @@ void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int
 
 		if ((position + i) < samplesVector.size()) {
 			output[i] = (samplesVector[position + i]);
-		}
+		} // if ((position + i) < samplesVector.size())
 
 		else {
 			output[i] = 0.0f;
-		}
+		} // else: if ((position + i) < samplesVector.size())
 
-	}
+	}  // for (int i = 0; i < output.size(); i++)
 
-}
+} // void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector)
 
 // ==================== Spherical2Cartesians ====================
 
@@ -476,7 +521,7 @@ Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radi
 	pos.z = (float) radius * sin(elevation);
 
 	return pos;
-}
+} // Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius)
 
 // ==================== RandomNumber ====================
 
@@ -485,4 +530,4 @@ int RandomNumber(int min, int max) {
     static std::mt19937 gen(rd());
     std::uniform_int_distribution<> dist(min, max);
     return dist(gen);
-}
+} // int RandomNumber(int min, int max)
