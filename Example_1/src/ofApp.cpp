@@ -11,15 +11,15 @@
 
 #define SAMPLE_RATE				44100
 
-#define SRC_SPEECH_FILE 		"resources/speech.wav"
+#define SRC_SPEECH_FILE 		"../resources/speech.wav"
 #define SRC_SPEECH_AZIMUTH		90
 #define SRC_SPEECH_ELEVATION	0
 #define SRC_SPEECH_DISTANCE		2
 
-#define SRC_STEPS_FILE 			"resources/steps.wav"
+#define SRC_STEPS_FILE 			"../resources/steps.wav"
 
-#define HRTF_FILE				"resources/hrtf.sofa"
-#define ILD_FILE				"resources/NearFieldCompensation_ILD_44100.sofa"
+#define HRTF_FILE				"../resources/hrtf.sofa"
+#define ILD_FILE				"../resources/NearFieldCompensation_ILD_44100.sofa"
 
 #define LISTENER_AZIMUTH		0
 #define LISTENER_ELEVATION		0
@@ -43,6 +43,7 @@ std::shared_ptr<BRTBase::CListener> listenerBRT;
 std::vector<std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable>> HRTF_list;
 std::vector<std::shared_ptr<BRTServices::CSphericalSOSTable>> ILD_list;
 Common::CEarPair<CMonoBuffer<float>> outputBufferStereo;
+Common::CEarPair<CMonoBuffer<float>> bufferProcessed;
 
 // BRT
 int GetAudioDeviceIndex(std::vector<ofSoundDevice> list);
@@ -192,6 +193,9 @@ void ofApp::setup() {
 
   	outputBufferStereo.left.resize(buffer_size);
   	outputBufferStereo.right.resize(buffer_size);
+
+	bufferProcessed.left.resize(buffer_size);
+	bufferProcessed.right.resize(buffer_size);
 
 	// #################### BRT SOURCE CODE END ####################
 
@@ -423,8 +427,6 @@ void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int buffer
 		sourceInput[cont_src_steps+1] = CMonoBuffer<float> (bufferSize);
 		FillBuffer(sourceInput[cont_src_steps+1], wavSamplePositionSourceN, positionEndFrameSourceN, samplesVectorSources[cont_src_steps+1]);
 	}
-
-	Common::CEarPair<CMonoBuffer<float>> bufferProcessed;
 
 	sourcesBRT[0]->SetBuffer(sourceInput[0]);
 

@@ -1,25 +1,10 @@
+# Linux (Native Compiling in Linux for Raspberry Pi)
+
 PROJECT_ROOT = $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
-ifeq ($(OS),Windows_NT)
-	# Windows (Cross Compiling in Windows)
-	CC      = aarch64-linux-gnu-g++
-	OF      = C:/home/pi/openFrameworks
-	BRT     = C:/home/pi/brt
-	SYSROOT = C:/home/pi/sysroot
-	CFLAGS  += --sysroot=$(SYSROOT)
-	LFLAGS  += --sysroot=$(SYSROOT)
-	LFLAGS  += -L$(SYSROOT)/lib
-	LFLAGS  += -L$(SYSROOT)/lib/aarch64-linux-gnu
-	LFLAGS  += -L$(SYSROOT)/usr/lib
-	LFLAGS  += -L$(SYSROOT)/usr/lib/aarch64-linux-gnu
-	LFLAGS  += -Wl,-rpath-link,$(SYSROOT)/lib/aarch64-linux-gnu
-	LFLAGS  += -Wl,-rpath-link,$(SYSROOT)/usr/lib/aarch64-linux-gnu
-else
-	# Linux (Native Compiling in Raspberry Pi)
-	CC      = g++
-	OF      = /home/pi/openFrameworks
-	BRT     = /home/pi/brt
-endif
+CC      = g++
+OF      = /home/pi/openFrameworks
+BRT     = /home/pi/brt
 
 INC_DIR += -I$(OF)/libs/glm/include
 INC_DIR += -I$(OF)/libs/json/include
@@ -55,17 +40,17 @@ LFLAGS += -lgstapp-1.0 -lgstvideo-1.0 -lgstbase-1.0 -lgstreamer-1.0 -ludev -lfon
 all: rbp
 
 rbp: $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o
-	@-cd $(PROJECT_ROOT) && mkdir bin
+	@mkdir -p $(PROJECT_ROOT)/bin
 	$(CC) -o $(PROJECT_ROOT)/bin/rbp $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/ofApp.o $(LIB_A) $(LFLAGS)
 
 $(PROJECT_ROOT)/build/main.o: $(PROJECT_ROOT)/src/main.cpp
-	@-cd $(PROJECT_ROOT) && mkdir build
+	@mkdir -p $(PROJECT_ROOT)/build
 	$(CC) -c $(PROJECT_ROOT)/src/main.cpp -o $(PROJECT_ROOT)/build/main.o $(CFLAGS)
 
 $(PROJECT_ROOT)/build/ofApp.o: $(PROJECT_ROOT)/src/ofApp.h $(PROJECT_ROOT)/src/ofApp.cpp
-	@-cd $(PROJECT_ROOT) && mkdir build
+	@mkdir -p $(PROJECT_ROOT)/build
 	$(CC) -c $(PROJECT_ROOT)/src/ofApp.cpp -o $(PROJECT_ROOT)/build/ofApp.o $(CFLAGS)
 
 clean:
-	rm -rf $(PROJECT_ROOT)/build
-	rm -rf $(PROJECT_ROOT)/bin
+	@rm -rf $(PROJECT_ROOT)/build
+	@rm -rf $(PROJECT_ROOT)/bin
