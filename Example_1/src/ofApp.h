@@ -5,10 +5,9 @@
 class ofApp : public ofBaseApp{
 
 	public:
-		// OpenFrameworks
+		ofApp(int argc, char *argv[]);
 		void setup();
 		void exit();
 		void AudioSetup(void);
 		void audioOut(float *outputBuffer, int bufferSize, int nChannels);
-		//void audioOut(ofSoundBuffer& buffer);
 };

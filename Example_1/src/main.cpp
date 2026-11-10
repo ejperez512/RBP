@@ -2,14 +2,10 @@
 #include "ofApp.h"
 #include "ofAppNoWindow.h"
 
-int main() {
-
+int main(int argc, char *argv[]) {
 	auto window = make_shared<ofAppNoWindow>();
+	auto app = make_shared<ofApp>(argc, argv);
 
-	//to have a normal windowed app comment the line above and uncomment the lines below
-	//ofGLWindowSettings settings;
-	//auto window = ofCreateWindow(settings);
-	
-	ofRunApp(window, make_shared<ofApp>());
+	ofRunApp(window, app);
 	ofRunMainLoop();
-}
+} // int main(int argc, char *argv[])
