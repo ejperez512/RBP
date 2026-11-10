@@ -122,7 +122,7 @@ void ofApp::setup() {
 
 	// Load HRTF
 
-	std::cout << "--- LOADING SOFA AND ILD FILES ---" << std::endl;
+	std::cout << "--- LOADING FILES ---" << std::endl;
 	std::cout << std::endl;
 
 	std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf = std::make_shared<BRTServices::CSphericalInterpolatedFIRTable>();
@@ -161,13 +161,9 @@ void ofApp::setup() {
 	Common::CTransform sourceBRT_pos = Common::CTransform();
 	sourceBRT_pos.SetPosition(Spherical2Cartesians(SRC_SPEECH_AZIMUTH, SRC_SPEECH_ELEVATION, SRC_SPEECH_DISTANCE));
 	sourcesBRT[0]->SetSourceTransform(sourceBRT_pos);
-	std::cout << "    Source 'speech'      position: [AZI: " << SRC_SPEECH_AZIMUTH << " ; ELE: " << SRC_SPEECH_ELEVATION << " ; DST: " << SRC_SPEECH_DISTANCE << "]" << std::endl;
+	std::cout << "    Source 'speech' position: [AZI: " << SRC_SPEECH_AZIMUTH << " ; ELE: " << SRC_SPEECH_ELEVATION << " ; DST: " << SRC_SPEECH_DISTANCE << "]" << std::endl;
 
 	// --- SOURCE WAV
-
-	std::cout << std::endl;
-	std::cout << "--- LOADING SOURCE FILES ---" << std::endl;
-	std::cout << std::endl;
 
 	// Load Source wave
 	LoadWav(samplesVectorSources[0], SRC_SPEECH_FILE);
@@ -197,7 +193,7 @@ void ofApp::setup() {
 		dst = RandomNumber(1, 5);
 		sourceNBRT_pos.SetPosition(Spherical2Cartesians(azi, ele, dst));
 		sourcesBRT[cont_src_steps+1]->SetSourceTransform(sourceNBRT_pos);
-		std::cout << "    Source 'steps' [#" << std::setw(2) << std::setfill('0') << cont_src_steps+1 << "] position: [AZI: " << std::setw(4) << std::setfill(' ') << azi << " ; ELE: " << std::setw(3) << std::setfill(' ') << ele << " ; DST: " << dst << "]" << std::endl;
+		std::cout << "    Source 'steps' [#" << cont_src_steps+1 << "] position: [AZI: " << azi << " ; ELE: " << ele << " ; DST: " << dst << "]" << std::endl;
 
 		// --- SOURCE WAV
 
@@ -385,7 +381,7 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 	delete[] sample;
 	delete[] byteSample;
 
-	std::cout << "successfull!" << std::endl; 
+	std::cout << "successful!" << std::endl; 
 } // void LoadWav(std::vector<float> &samplesVector, const char *stringIn)
 
 // ==================== LoadSofaFile ====================
@@ -406,11 +402,11 @@ bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSp
 		return false;
 	} // if (globalParameters.GetSampleRate() != sampleRateInSOFAFile)
 
-	std::cout << "   Loading SOFA File [" << _filePath << "]: ";
+	std::cout << "    Loading SOFA File [" << _filePath << "]: ";
 	bool result = sofaReader.ReadHRTFFromSofa(_filePath, "", hrtf, HRTF_RESAMPLING_STEP, BRTServices::TEXTRAPOLATION_METHOD::nearest_point);
 
 	if (result) {
-		std::cout << "successfull!" << std::endl;            
+		std::cout << "successful!" << std::endl;            
 		return true;
 	} // if (result)
 
@@ -439,11 +435,11 @@ bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSO
 		return false;
 	} // if (globalParameters.GetSampleRate() != sampleRateInSOFAFile)
 	
-	std::cout << "   Loading ILD File [" << _ildFilePath << "]: ";
+	std::cout << "    Loading ILD File [" << _ildFilePath << "]: ";
 	bool result = sofaReader.ReadSOSFiltersFromSofa(_ildFilePath, _sosFilter);
 
 	if (result) {
-		std::cout << "successfull!" << std::endl;            
+		std::cout << "successful!" << std::endl;            
 		return true;
 	} // if (result)
 
