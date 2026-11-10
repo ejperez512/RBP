@@ -55,7 +55,47 @@ void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int
 Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius);
 int RandomNumber(int min, int max);
 
-// ==================== main ====================
+// ==================== ofApp::ofApp ====================
+
+ofApp::ofApp(int argc, char *argv[]) {
+
+	if (argc == 1) {
+		buffer_size = -1;
+		num_src_steps = -1;
+	} // if (argc == 1)
+
+	else if (argc == 2) {
+		buffer_size = atoi(argv[1]);
+
+		if (buffer_size <= 0) {
+			buffer_size = 2048;
+		} // if (buffer_size <= 0)
+
+		num_src_steps = -1;
+	} // else if (argc == 2)
+
+	else if (argc == 3) {
+		buffer_size = atoi(argv[1]);
+
+		if (buffer_size <= 0) {
+			buffer_size = 2048;
+		} // if (buffer_size <= 0)
+
+		num_src_steps = atoi(argv[2]);
+
+		if (num_src_steps < 0) {
+			num_src_steps = 0;
+		} // if (num_src_steps < 0)
+		
+		if (num_src_steps > MAX_SRC-1) {
+			num_src_steps = MAX_SRC-1;
+		} // if (num_src_steps > MAX_SRC-1)
+
+	} // else if (argc == 3)
+
+} // ofApp::ofApp(int argc, char *argv[])
+
+// ==================== ofApp::setup ====================
 
 void ofApp::setup() {
 	int azi, ele, dst;
@@ -66,29 +106,42 @@ void ofApp::setup() {
 	std::cout << std::endl;
 	std::cout << "--- BUFFER SIZE ---" << std::endl;
 	std::cout << std::endl;
-	std::cout << "    Enter buffer size (default is 2048): ";
-	std::cin >> buffer_size;
 
-	if (buffer_size <= 0) {
-		buffer_size = 2048;
-	} // if (buffer_size <= 0)
-	
+	if (buffer_size == -1) {
+		std::cout << "    Enter buffer size (default is 2048): ";
+		std::cin >> buffer_size;
+		std::cout << std::endl;
+		
+		if (buffer_size <= 0) {
+			buffer_size = 2048;
+		} // if (buffer_size <= 0)
+
+	} // if (buffer_size == -1)
+
+	std::cout << "    Buffer size: " << buffer_size << std::endl;
 	std::cout << std::endl;
+
 	std::cout << "--- NUMBER OF SOURCES ---" << std::endl;
 	std::cout << std::endl;
 	std::cout << "    This application uses a 'speech' source and a configurable number of 'steps' sources at random positions." << std::endl;
 	std::cout << std::endl;
-	std::cout << "    Number of 'steps' sources (0.." << MAX_SRC-1 << "): ";
-	std::cin >> num_src_steps;
 
-	if (num_src_steps < 0) {
-		num_src_steps = 0;
-	} // if (num_src_steps < 0)
-	
-	if (num_src_steps > MAX_SRC-1) {
-		num_src_steps = MAX_SRC-1;
-	} // if (num_src_steps > MAX_SRC-1)
+	if (num_src_steps == -1) {
+		std::cout << "    Enter number of 'steps' sources (0.." << MAX_SRC-1 << "): ";
+		std::cin >> num_src_steps;
+		std::cout << std::endl;
 
+		if (num_src_steps < 0) {
+			num_src_steps = 0;
+		} // if (num_src_steps < 0)
+		
+		if (num_src_steps > MAX_SRC-1) {
+			num_src_steps = MAX_SRC-1;
+		} // if (num_src_steps > MAX_SRC-1)
+
+	} // if (num_src_steps == -1)
+
+	std::cout << "    Number of 'steps' sources: " << num_src_steps << std::endl;
 	std::cout << std::endl;
 
 	// #################### BRT SOURCE CODE BEGIN ####################
