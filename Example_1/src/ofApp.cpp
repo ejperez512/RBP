@@ -1,5 +1,6 @@
 #include "ofApp.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -29,6 +30,7 @@
 
 int buffer_size;
 int num_src_steps;
+int device;
 
 // OpenFrameworks
 ofSoundStream systemSoundStream;
@@ -59,28 +61,24 @@ int RandomNumber(int min, int max);
 
 ofApp::ofApp(int argc, char *argv[]) {
 
-	if (argc == 1) {
-		buffer_size = -1;
-		num_src_steps = -1;
-	} // if (argc == 1)
+	buffer_size = -1;
+	num_src_steps = -1;
+	device = -1;
 
-	else if (argc == 2) {
+	std::cout << std::endl;
+	std::cout << "Usage: " << argv[0] << " [buffer_size] [num_src_steps] [device]" << std::endl;
+	std::cout << std::endl;
+
+	if (argc >= 2) {
 		buffer_size = atoi(argv[1]);
 
 		if (buffer_size <= 0) {
 			buffer_size = 2048;
 		} // if (buffer_size <= 0)
 
-		num_src_steps = -1;
-	} // else if (argc == 2)
+	} // if (argc >= 2)
 
-	else if (argc == 3) {
-		buffer_size = atoi(argv[1]);
-
-		if (buffer_size <= 0) {
-			buffer_size = 2048;
-		} // if (buffer_size <= 0)
-
+	if (argc >= 3) {
 		num_src_steps = atoi(argv[2]);
 
 		if (num_src_steps < 0) {
@@ -91,7 +89,16 @@ ofApp::ofApp(int argc, char *argv[]) {
 			num_src_steps = MAX_SRC-1;
 		} // if (num_src_steps > MAX_SRC-1)
 
-	} // else if (argc == 3)
+	} // if (argc >= 3)
+
+	if (argc >= 4) {
+		device = std::toupper(argv[3][0]) - 'A';
+
+		if (device < 0) {
+			device = 0;
+		} // if (device < 0)
+
+	} // if (argc >= 4)
 
 } // ofApp::ofApp(int argc, char *argv[])
 
@@ -103,7 +110,6 @@ void ofApp::setup() {
 
 	ofSetLogLevel(OF_LOG_SILENT);
 
-	std::cout << std::endl;
 	std::cout << "--- BUFFER SIZE ---" << std::endl;
 	std::cout << std::endl;
 
@@ -317,7 +323,6 @@ void ofApp::AudioSetup(void) {
     close(bak);
     close(nullFd);
 
-	std::cout << std::endl;
 	std::cout << "PRESS <CTRL+C> TO QUIT" << std::endl;
 } // void ofApp::AudioSetup(void)
 
@@ -358,19 +363,40 @@ int GetAudioDeviceIndex(std::vector<ofSoundDevice> list) {
 
 		std::cout << std::endl;
 	} // for (int i = 0; i < numberOfAudioDevices; i++)
+
+	std::cout << std::endl;
 	
 	char selectedAudioDevice_key;
 	int selectedAudioDevice;
 
-	do {
+	if (device == -1) {
+
+		do {
+			std::cout << "    Select audio device: ";
+			std::cin >> selectedAudioDevice_key;
+			selectedAudioDevice_key = std::toupper(selectedAudioDevice_key);
+			std::cin.clear();
+			std::cin.ignore(INT_MAX, '\n');
+			selectedAudioDevice = selectedAudioDevice_key - 'A';
+		} while ((selectedAudioDevice < 0) || (selectedAudioDevice >= numberOfAudioDevices));
+
 		std::cout << std::endl;
-		std::cout << "    Please choose which audio output you wish to use: ";
-		std::cin >> selectedAudioDevice_key;
-		selectedAudioDevice_key = toupper(selectedAudioDevice_key);
-		std::cin.clear();
-		std::cin.ignore(INT_MAX, '\n');
-		selectedAudioDevice = selectedAudioDevice_key - 'A';
-	} while ((selectedAudioDevice < 0) || (selectedAudioDevice >= numberOfAudioDevices));
+	} // if (device == -1)
+
+	else {
+		
+		if (device > (numberOfAudioDevices-1)) {
+			selectedAudioDevice = 0;
+		} // if (device > (numberOfAudioDevices-1))
+		
+		else {
+			selectedAudioDevice = device;
+		} // else: if (device > (numberOfAudioDevices-1))
+
+	} // else: if (device == -1)
+
+	std::cout << "    Audio device: " << list[selectedAudioDevice].name << " (ID: " << list[selectedAudioDevice].deviceID << ")" << std::endl;
+	std::cout << std::endl;
 
 	for (int c = 0; c < numberOfAudioDevices; c++) {
 		ofSoundDevice &dev = list[c];
