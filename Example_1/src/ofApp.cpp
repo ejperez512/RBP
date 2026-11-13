@@ -8,8 +8,6 @@
 
 #include <BRTLibrary.h>
 
-#define MAX_SRC					100
-
 #define SAMPLE_RATE				44100
 
 #define SRC_SPEECH_FILE 		"../resources/speech.wav"
@@ -38,8 +36,8 @@ ofSoundStream systemSoundStream;
 // BRT
 BRTBase::CBRTManager brtManager;
 Common::CGlobalParameters globalParameters;
-std::shared_ptr<BRTSourceModel::CSourceModelBase> sourcesBRT[MAX_SRC];
-std::vector<float> samplesVectorSources[MAX_SRC];
+std::vector<std::shared_ptr<BRTSourceModel::CSourceModelBase>> sourcesBRT;
+std::vector<std::vector<float>> samplesVectorSources;
 std::shared_ptr<BRTListenerModel::CListenerModelBase> listenerMODEL;
 std::shared_ptr<BRTBase::CListener> listenerBRT;
 std::vector<std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable>> HRTF_list;
@@ -53,7 +51,7 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn);
 bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf);
 bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter);
 void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize);
-void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector);
+void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector);
 Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius);
 int RandomNumber(int min, int max);
 
@@ -85,10 +83,6 @@ ofApp::ofApp(int argc, char *argv[]) {
 			num_src_steps = 0;
 		} // if (num_src_steps < 0)
 		
-		if (num_src_steps > MAX_SRC-1) {
-			num_src_steps = MAX_SRC-1;
-		} // if (num_src_steps > MAX_SRC-1)
-
 	} // if (argc >= 3)
 
 	if (argc >= 4) {
@@ -133,7 +127,7 @@ void ofApp::setup() {
 	std::cout << std::endl;
 
 	if (num_src_steps == -1) {
-		std::cout << "    Enter number of 'steps' sources (0.." << MAX_SRC-1 << "): ";
+		std::cout << "    Enter number of 'steps' sources: ";
 		std::cin >> num_src_steps;
 		std::cout << std::endl;
 
@@ -141,13 +135,10 @@ void ofApp::setup() {
 			num_src_steps = 0;
 		} // if (num_src_steps < 0)
 		
-		if (num_src_steps > MAX_SRC-1) {
-			num_src_steps = MAX_SRC-1;
-		} // if (num_src_steps > MAX_SRC-1)
-
 	} // if (num_src_steps == -1)
 
 	std::cout << "    Number of 'steps' sources: " << num_src_steps << std::endl;
+	std::cout << "    TOTAL number of sources: " << num_src_steps + 1 << std::endl;
 	std::cout << std::endl;
 
 	// #################### BRT SOURCE CODE BEGIN ####################
@@ -205,13 +196,13 @@ void ofApp::setup() {
 	// Create Source 'speech'
 
 	brtManager.BeginSetup();
-	sourcesBRT[0] = brtManager.CreateSoundSource<BRTSourceModel::CSourceOmnidirectionalModel>("speech");
+	sourcesBRT.push_back(brtManager.CreateSoundSource<BRTSourceModel::CSourceOmnidirectionalModel>("speech"));
 	brtManager.EndSetup();
 
 	// --- SOURCE -> LISTENER MODEL
 
 	brtManager.BeginSetup();
-	listenerMODEL->ConnectSoundSource(sourcesBRT[0]);
+	listenerMODEL->ConnectSoundSource(sourcesBRT.back());
 	brtManager.EndSetup();
 
 	// --- SOURCE POSITION
@@ -219,13 +210,14 @@ void ofApp::setup() {
 	// Set Source position
 	Common::CTransform sourceBRT_pos = Common::CTransform();
 	sourceBRT_pos.SetPosition(Spherical2Cartesians(SRC_SPEECH_AZIMUTH, SRC_SPEECH_ELEVATION, SRC_SPEECH_DISTANCE));
-	sourcesBRT[0]->SetSourceTransform(sourceBRT_pos);
+	sourcesBRT.back()->SetSourceTransform(sourceBRT_pos);
 	std::cout << "    Source 'speech' position: [AZI: " << SRC_SPEECH_AZIMUTH << " ; ELE: " << SRC_SPEECH_ELEVATION << " ; DST: " << SRC_SPEECH_DISTANCE << "]" << std::endl;
 
 	// --- SOURCE WAV
 
 	// Load Source wave
-	LoadWav(samplesVectorSources[0], SRC_SPEECH_FILE);
+	samplesVectorSources.push_back(std::vector<float>());
+	LoadWav(samplesVectorSources.back(), SRC_SPEECH_FILE);
 
 	// --- SOURCES STEPS [OMNIDIRECTIONAL]
 
@@ -234,13 +226,13 @@ void ofApp::setup() {
 		// Create Source 'steps'
 
 		brtManager.BeginSetup();
-		sourcesBRT[cont_src_steps+1] = brtManager.CreateSoundSource<BRTSourceModel::CSourceOmnidirectionalModel>("steps" + std::to_string(cont_src_steps+1));
+		sourcesBRT.push_back(brtManager.CreateSoundSource<BRTSourceModel::CSourceOmnidirectionalModel>("steps" + std::to_string(cont_src_steps+1)));
 		brtManager.EndSetup();
 
 		// --- SOURCE -> LISTENER MODEL
 
 		brtManager.BeginSetup();
-		listenerMODEL->ConnectSoundSource(sourcesBRT[cont_src_steps+1]);
+		listenerMODEL->ConnectSoundSource(sourcesBRT.back());
 		brtManager.EndSetup();
 
 		// --- SOURCE POSITION
@@ -251,14 +243,15 @@ void ofApp::setup() {
 		ele = RandomNumber(-90, 90);
 		dst = RandomNumber(1, 5);
 		sourceNBRT_pos.SetPosition(Spherical2Cartesians(azi, ele, dst));
-		sourcesBRT[cont_src_steps+1]->SetSourceTransform(sourceNBRT_pos);
+		sourcesBRT.back()->SetSourceTransform(sourceNBRT_pos);
 		std::cout << "    Source 'steps' [#" << cont_src_steps+1 << "] position: [AZI: " << azi << " ; ELE: " << ele << " ; DST: " << dst << "]" << std::endl;
 
 		// --- SOURCE WAV
 
 		// Load Source wave
-		LoadWav(samplesVectorSources[cont_src_steps+1], SRC_STEPS_FILE);
-	}
+		samplesVectorSources.push_back(std::vector<float>());
+		LoadWav(samplesVectorSources.back(), SRC_STEPS_FILE);
+	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
 
 	// =====================
 	// === AUDIO PROCESS ===
@@ -532,27 +525,15 @@ bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSO
 // ==================== audioProcess ====================
 
 void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize) {
-	int cont_src_steps;
-	CMonoBuffer<float> sourceInput[MAX_SRC];
-	
-	static unsigned int wavSamplePositionSource1 = 0;
-	static unsigned int positionEndFrameSource1 = 0;
-	static unsigned int wavSamplePositionSourceN = 0;
-	static unsigned int positionEndFrameSourceN = 0;
+	int cont_src;
 
-	sourceInput[0] = CMonoBuffer<float> (bufferSize);
-	FillBuffer(sourceInput[0], wavSamplePositionSource1, positionEndFrameSource1, samplesVectorSources[0]);
-	
-	for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++) {
-		sourceInput[cont_src_steps+1] = CMonoBuffer<float> (bufferSize);
-		FillBuffer(sourceInput[cont_src_steps+1], wavSamplePositionSourceN, positionEndFrameSourceN, samplesVectorSources[cont_src_steps+1]);
-	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
+	static std::vector<CMonoBuffer<float>> sourceInput(sourcesBRT.size(), CMonoBuffer<float>(bufferSize));
+	static std::vector<unsigned int> wavSamplePosition(sourcesBRT.size(), 0);
 
-	sourcesBRT[0]->SetBuffer(sourceInput[0]);
-
-	for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++) {
-		sourcesBRT[cont_src_steps+1]->SetBuffer(sourceInput[cont_src_steps+1]);
-	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
+	for (cont_src = 0; cont_src < sourcesBRT.size(); cont_src++) {
+		FillBuffer(sourceInput[cont_src], wavSamplePosition[cont_src], samplesVectorSources[cont_src]);
+		sourcesBRT[cont_src]->SetBuffer(sourceInput[cont_src]);
+	}
 
 	brtManager.ProcessAll();
 	listenerBRT->GetBuffers(bufferProcessed.left, bufferProcessed.right);
@@ -563,14 +544,11 @@ void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int buffer
 
 // ==================== FillBuffer ====================
 
-void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector) {
-	position = endFrame + 1;
+void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector) {
 
 	if (position >= samplesVector.size()) {
 		position = 0;
 	} // if (position >= samplesVector.size())
-
-	endFrame = position + output.size() - 1;
 
 	for (int i = 0; i < output.size(); i++) {
 
@@ -584,6 +562,7 @@ void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int
 
 	}  // for (int i = 0; i < output.size(); i++)
 
+	position += output.size();
 } // void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector)
 
 // ==================== Spherical2Cartesians ====================
