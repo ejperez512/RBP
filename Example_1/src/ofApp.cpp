@@ -1,74 +1,20 @@
 #include "ofApp.h"
 
-#include <cctype>
-#include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <random>
-
-#include <BRTLibrary.h>
-
-#define SAMPLE_RATE				44100
-
-#define SRC_SPEECH_FILE 		"../resources/speech.wav"
-#define SRC_SPEECH_AZIMUTH		90
-#define SRC_SPEECH_ELEVATION	0
-#define SRC_SPEECH_DISTANCE		2
-
-#define SRC_STEPS_FILE 			"../resources/steps.wav"
-
-#define HRTF_FILE				"../resources/hrtf.sofa"
-#define ILD_FILE				"../resources/NearFieldCompensation_ILD_44100.sofa"
-
-#define LISTENER_AZIMUTH		0
-#define LISTENER_ELEVATION		0
-#define LISTENER_DISTANCE		0
-
-#define HRTF_RESAMPLING_STEP	15
-
-int buffer_size;
-int num_src_steps;
-int device;
-
-// OpenFrameworks
-ofSoundStream systemSoundStream;
-
-// BRT
-BRTBase::CBRTManager brtManager;
-Common::CGlobalParameters globalParameters;
-std::vector<std::shared_ptr<BRTSourceModel::CSourceModelBase>> sourcesBRT;
-std::vector<std::vector<float>> samplesVectorSources;
-std::shared_ptr<BRTListenerModel::CListenerModelBase> listenerMODEL;
-std::shared_ptr<BRTBase::CListener> listenerBRT;
-std::vector<std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable>> HRTF_list;
-std::vector<std::shared_ptr<BRTServices::CSphericalSOSTable>> ILD_list;
-Common::CEarPair<CMonoBuffer<float>> outputBufferStereo;
-Common::CEarPair<CMonoBuffer<float>> bufferProcessed;
-
-// BRT
-int GetAudioDeviceIndex(std::vector<ofSoundDevice> list);
-void LoadWav(std::vector<float> &samplesVector, const char *stringIn);
-bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf);
-bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter);
-void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize);
-void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector);
-Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius);
-int RandomNumber(int min, int max);
+#include <cctype>   // std::toupper
+#include <cstdio>   // std::fopen, std::fread, std::fclose
+#include <cstring>  // std::memset
+#include <iostream> // std::cout, std::cin
+#include <random>   // std::random_device, std::mt19937
 
 // ==================== ofApp::ofApp ====================
 
 ofApp::ofApp(int argc, char *argv[]) {
-
-	buffer_size = -1;
-	num_src_steps = -1;
-	device = -1;
-
 	std::cout << std::endl;
 	std::cout << "Usage: " << argv[0] << " [buffer_size] [num_src_steps] [device]" << std::endl;
 	std::cout << std::endl;
 
 	if (argc >= 2) {
-		buffer_size = atoi(argv[1]);
+		buffer_size = std::atoi(argv[1]);
 
 		if (buffer_size <= 0) {
 			buffer_size = 2048;
@@ -77,7 +23,7 @@ ofApp::ofApp(int argc, char *argv[]) {
 	} // if (argc >= 2)
 
 	if (argc >= 3) {
-		num_src_steps = atoi(argv[2]);
+		num_src_steps = std::atoi(argv[2]);
 
 		if (num_src_steps < 0) {
 			num_src_steps = 0;
@@ -253,6 +199,9 @@ void ofApp::setup() {
 		LoadWav(samplesVectorSources.back(), SRC_STEPS_FILE);
 	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
 
+	sourceInputBuffers.resize(sourcesBRT.size(), CMonoBuffer<float>(buffer_size));
+	wavSamplePositions.resize(sourcesBRT.size(), 0);
+
 	// =====================
 	// === AUDIO PROCESS ===
 	// =====================
@@ -265,8 +214,7 @@ void ofApp::setup() {
 
 	// #################### BRT SOURCE CODE END ####################
 
-	ofApp::AudioSetup();
-
+	AudioSetup();
 } // void ofApp::setup()
 
 // ==================== ofApp::exit ====================
@@ -275,6 +223,26 @@ void ofApp::exit() {
     systemSoundStream.close();
     systemSoundStream.stop();
 } // void ofApp::exit()
+
+// ==================== ofApp::audioOut ====================
+
+void ofApp::audioOut(float *outputBuffer, int bufferSize, int nChannels) {
+	float *floatOutputBuffer = (float *) outputBuffer;
+
+	outputBufferStereo.left.Fill(bufferSize, 0.0f);
+	outputBufferStereo.right.Fill(bufferSize, 0.0f);
+
+	audioProcess(outputBufferStereo, bufferSize);
+
+	CStereoBuffer<float> iOutput;
+	iOutput.Interlace(outputBufferStereo.left, outputBufferStereo.right);
+
+	for (auto it = iOutput.begin(); it != iOutput.end(); it++) {
+		floatOutputBuffer[0] = *it;
+		floatOutputBuffer = &floatOutputBuffer[1];
+	} // for (auto it = iOutput.begin(); it != iOutput.end(); it++)
+
+} // void ofApp::audioOut
 
 // ==================== ofApp::AudioSetup ====================
 
@@ -319,29 +287,26 @@ void ofApp::AudioSetup(void) {
 	std::cout << "PRESS <CTRL+C> TO QUIT" << std::endl;
 } // void ofApp::AudioSetup(void)
 
-// ==================== ofApp::audioOut ====================
+// ==================== ofApp::audioProcess ====================
 
-void ofApp::audioOut(float *outputBuffer, int bufferSize, int nChannels) {
-	float *floatOutputBuffer = (float *) outputBuffer;
+void ofApp::audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize) {
+	int cont_src;
 
-	outputBufferStereo.left.Fill(bufferSize, 0.0f);
-	outputBufferStereo.right.Fill(bufferSize, 0.0f);
-
-	audioProcess(outputBufferStereo, bufferSize);
-
-	CStereoBuffer<float> iOutput;
-	iOutput.Interlace(outputBufferStereo.left, outputBufferStereo.right);
-
-	for (auto it = iOutput.begin(); it != iOutput.end(); it++) {
-		floatOutputBuffer[0] = *it;
-		floatOutputBuffer = &floatOutputBuffer[1];
+	for (cont_src = 0; cont_src < sourcesBRT.size(); cont_src++) {
+		FillBuffer(sourceInputBuffers[cont_src], wavSamplePositions[cont_src], samplesVectorSources[cont_src]);
+		sourcesBRT[cont_src]->SetBuffer(sourceInputBuffers[cont_src]);
 	}
 
-} // void ofApp::audioOut
+	brtManager.ProcessAll();
+	listenerBRT->GetBuffers(bufferProcessed.left, bufferProcessed.right);
 
-// ==================== GetAudioDeviceIndex ====================
+	bufferOutput.left += bufferProcessed.left;
+	bufferOutput.right += bufferProcessed.right;
+} // void ofApp::audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize)
 
-int GetAudioDeviceIndex(std::vector<ofSoundDevice> list) {
+// ==================== ofApp::GetAudioDeviceIndex ====================
+
+int ofApp::GetAudioDeviceIndex(std::vector<ofSoundDevice> list) {
 	int numberOfAudioDevices = list.size();
 	std::cout << std::endl;
 	std::cout << "--- DEVICES ---" << std::endl;
@@ -410,17 +375,17 @@ int GetAudioDeviceIndex(std::vector<ofSoundDevice> list) {
 	} // for (int c = 0; c < numberOfAudioDevices; c++)
 
 	return -1;
-} // int GetAudioDeviceIndex(std::vector<ofSoundDevice> list)
+} // int ofApp::GetAudioDeviceIndex(std::vector<ofSoundDevice> list)
 
-// ==================== LoadWav ====================
+// ==================== ofApp::LoadWav ====================
 
-void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
+void ofApp::LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 	struct WavHeader {
 		char		fill[40];
 		uint32_t	bytesCount;
 	} wavHeader;
 
-	FILE* wavFile = fopen(stringIn, "rb");
+	FILE* wavFile = std::fopen(stringIn, "rb");
 
 	if (!wavFile) {
 		std::cout << "    Error loading WAV file [" << stringIn << "]" << std::endl;
@@ -428,18 +393,18 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 	} // if (!wavFile)
 
 	std::cout << "    Loading WAV File [" << stringIn << "]: ";
-	fread(&wavHeader, sizeof(wavHeader), 1, wavFile);
-	fseek(wavFile, sizeof(wavHeader), SEEK_SET);
+	std::fread(&wavHeader, sizeof(wavHeader), 1, wavFile);
+	std::fseek(wavFile, sizeof(wavHeader), SEEK_SET);
 
 	unsigned int samplesCount = wavHeader.bytesCount / 2;
 	int16_t *sample = new int16_t[samplesCount];
-	memset(sample, 0, sizeof(int16_t) * samplesCount);
+	std::memset(sample, 0, sizeof(int16_t) * samplesCount);
 
 	uint8_t *byteSample = new uint8_t[2 * samplesCount];
-	memset(byteSample, 0, sizeof(uint8_t) * 2 * samplesCount);
+	std::memset(byteSample, 0, sizeof(uint8_t) * 2 * samplesCount);
 
-	fread(byteSample, 1, 2 * samplesCount, wavFile);
-	fclose(wavFile);
+	std::fread(byteSample, 1, 2 * samplesCount, wavFile);
+	std::fclose(wavFile);
 
 	for (int i = 0; i < samplesCount; i++) {
 		sample[i] = int16_t(byteSample[2 * i] | byteSample[2 * i + 1] << 8);
@@ -454,13 +419,12 @@ void LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
 	delete[] byteSample;
 
 	std::cout << "successful!" << std::endl; 
-} // void LoadWav(std::vector<float> &samplesVector, const char *stringIn)
+} // void ofApp::LoadWav(std::vector<float> &samplesVector, const char *stringIn)
 
-// ==================== LoadSofaFile ====================
+// ==================== ofApp::LoadSofaFile ====================
 
-bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf) {
+bool ofApp::LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf) {
 	BRTReaders::CSOFAReader sofaReader;
-	Common::CGlobalParameters globalParameters; 
 
 	int sampleRateInSOFAFile = sofaReader.GetSampleRateFromSofa(_filePath);
 
@@ -487,13 +451,12 @@ bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSp
 		return false;
 	} // else: if (result)
 	
-} // bool LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf)
+} // bool ofApp::LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf)
 
-// ==================== LoadILD ====================
+// ==================== ofApp::LoadILD ====================
 
-bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter) {
+bool ofApp::LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter) {
 	BRTReaders::CSOFAReader sofaReader;
-	Common::CGlobalParameters globalParameters;
 	
 	int sampleRateInSOFAFile = sofaReader.GetSampleRateFromSofa(_ildFilePath);
 
@@ -520,31 +483,11 @@ bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSO
 		return false;
 	} // else: if (result)
 
-} // bool LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter)
+} // bool ofApp::LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter)
 
-// ==================== audioProcess ====================
+// ==================== ofApp::FillBuffer ====================
 
-void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize) {
-	int cont_src;
-
-	static std::vector<CMonoBuffer<float>> sourceInput(sourcesBRT.size(), CMonoBuffer<float>(bufferSize));
-	static std::vector<unsigned int> wavSamplePosition(sourcesBRT.size(), 0);
-
-	for (cont_src = 0; cont_src < sourcesBRT.size(); cont_src++) {
-		FillBuffer(sourceInput[cont_src], wavSamplePosition[cont_src], samplesVectorSources[cont_src]);
-		sourcesBRT[cont_src]->SetBuffer(sourceInput[cont_src]);
-	}
-
-	brtManager.ProcessAll();
-	listenerBRT->GetBuffers(bufferProcessed.left, bufferProcessed.right);
-
-	bufferOutput.left += bufferProcessed.left;
-	bufferOutput.right += bufferProcessed.right;
-} // void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize)
-
-// ==================== FillBuffer ====================
-
-void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector) {
+void ofApp::FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector) {
 
 	if (position >= samplesVector.size()) {
 		position = 0;
@@ -563,25 +506,25 @@ void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<
 	}  // for (int i = 0; i < output.size(); i++)
 
 	position += output.size();
-} // void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector)
+} // void ofApp::FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector)
 
-// ==================== Spherical2Cartesians ====================
+// ==================== ofApp::Spherical2Cartesians ====================
 
-Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius) {
+Common::CVector3 ofApp::Spherical2Cartesians(float azimuth, float elevation, float radius) {
 	Common::CVector3 pos;
 
-	pos.x = (float) radius * cos(azimuth) * cos(elevation);
-	pos.y = (float) radius * sin(azimuth) * cos(elevation);
-	pos.z = (float) radius * sin(elevation);
+	pos.x = (float) radius * std::cos(azimuth) * std::cos(elevation);
+	pos.y = (float) radius * std::sin(azimuth) * std::cos(elevation);
+	pos.z = (float) radius * std::sin(elevation);
 
 	return pos;
-} // Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius)
+} // Common::CVector3 ofApp::Spherical2Cartesians(float azimuth, float elevation, float radius)
 
-// ==================== RandomNumber ====================
+// ==================== ofApp::RandomNumber ====================
 
-int RandomNumber(int min, int max) {
+int ofApp::RandomNumber(int min, int max) {
     static std::random_device rd;
     static std::mt19937 gen(rd());
     std::uniform_int_distribution<> dist(min, max);
     return dist(gen);
-} // int RandomNumber(int min, int max)
+} // int ofApp::RandomNumber(int min, int max)
