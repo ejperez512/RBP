@@ -6,11 +6,16 @@
 #include <iostream> // std::cout, std::cin
 #include <random>   // std::random_device, std::mt19937
 
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+
 // ==================== ofApp::ofApp ====================
 
 ofApp::ofApp(int argc, char *argv[]) {
 	std::cout << std::endl;
-	std::cout << "Usage: " << argv[0] << " [buffer_size] [num_src_steps] [device]" << std::endl;
+	std::cout << "Usage: " << argv[0] << " [buffer_size] [num_src_steps] [device] [benchmark_sec]" << std::endl;
 	std::cout << std::endl;
 
 	if (argc >= 2) {
@@ -39,6 +44,15 @@ ofApp::ofApp(int argc, char *argv[]) {
 		} // if (device < 0)
 
 	} // if (argc >= 4)
+
+	if (argc >= 5) {
+		benchmark_sec = std::atoi(argv[4]);
+
+		if (benchmark_sec <= 0) {
+			benchmark_sec = -1;
+		} // if (benchmark_sec <= 0)
+
+	} // if (argc >= 5)
 
 } // ofApp::ofApp(int argc, char *argv[])
 
@@ -214,19 +228,89 @@ void ofApp::setup() {
 
 	// #################### BRT SOURCE CODE END ####################
 
+if (benchmark_sec > 0) {
+		double blocksPerSec = static_cast<double>(SAMPLE_RATE) / static_cast<double>(buffer_size);
+		targetBlocks = static_cast<std::size_t>(benchmark_sec * blocksPerSec);
+		procTimesMs.reserve(targetBlocks);
+		arrivalTimesMs.reserve(targetBlocks);
+		currentBlockCount = 0;
+		hasPreviousCallback = false;
+		benchmarkFinished.store(false);
+	}
+
 	AudioSetup();
 } // void ofApp::setup()
+
+// ==================== ofApp::update ====================
+
+void ofApp::update() {
+
+	if (benchmark_sec > 0 && benchmarkFinished.load()) {
+		ofExit(0);
+	} // if (benchmark_sec > 0 && benchmarkFinished.load())
+
+} // void ofApp::update()
 
 // ==================== ofApp::exit ====================
 
 void ofApp::exit() {
     systemSoundStream.close();
     systemSoundStream.stop();
+
+	if (benchmark_sec > 0) {
+		SaveAndPrintMetrics();
+	} // if (benchmark_sec > 0)
+
 } // void ofApp::exit()
 
 // ==================== ofApp::audioOut ====================
 
 void ofApp::audioOut(float *outputBuffer, int bufferSize, int nChannels) {
+
+	if (benchmark_sec > 0) {
+		if (benchmarkFinished.load()) {
+			std::memset(outputBuffer, 0, sizeof(float) * bufferSize * nChannels);
+			return;
+		}
+
+		auto tStart = std::chrono::steady_clock::now();
+		bool isWarmupDone = (currentBlockCount >= WARMUP_BLOCKS);
+
+		if (isWarmupDone && hasPreviousCallback && arrivalTimesMs.size() < targetBlocks) {
+			double arrivalMs = std::chrono::duration<double, std::milli>(tStart - lastCallbackStart).count();
+			arrivalTimesMs.push_back(arrivalMs);
+		}
+		lastCallbackStart = tStart;
+		hasPreviousCallback = true;
+
+		float *floatOutputBuffer = (float *) outputBuffer;
+		outputBufferStereo.left.Fill(bufferSize, 0.0f);
+		outputBufferStereo.right.Fill(bufferSize, 0.0f);
+
+		audioProcess(outputBufferStereo, bufferSize);
+
+		CStereoBuffer<float> iOutput;
+		iOutput.Interlace(outputBufferStereo.left, outputBufferStereo.right);
+
+		for (auto it = iOutput.begin(); it != iOutput.end(); it++) {
+			floatOutputBuffer[0] = *it;
+			floatOutputBuffer = &floatOutputBuffer[1];
+		}
+
+		auto tEnd = std::chrono::steady_clock::now();
+		if (isWarmupDone && procTimesMs.size() < targetBlocks) {
+			double procMs = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
+			procTimesMs.push_back(procMs);
+
+			if (procTimesMs.size() >= targetBlocks) {
+				benchmarkFinished.store(true);
+			}
+		}
+
+		currentBlockCount++;
+		return;
+	} // if (benchmark_sec > 0 && benchmarkFinished.load())
+
 	float *floatOutputBuffer = (float *) outputBuffer;
 
 	outputBufferStereo.left.Fill(bufferSize, 0.0f);
@@ -284,7 +368,16 @@ void ofApp::AudioSetup(void) {
     close(bak);
     close(nullFd);
 
-	std::cout << "PRESS <CTRL+C> TO QUIT" << std::endl;
+	if (benchmark_sec > 0) {
+		std::cout << "--- BENCHMARK MODE: " << benchmark_sec << " s (" << targetBlocks << " blocks + " << WARMUP_BLOCKS << " warmup) ---" << std::endl;
+		std::cout << std::endl;
+	} // if (benchmark_sec > 0)
+
+	else {
+		std::cout << "--- REALTIME MODE: PRESS <CTRL+C> TO QUIT" << std::endl;
+		std::cout << std::endl;
+	} // else: if (benchmark_sec > 0)
+
 } // void ofApp::AudioSetup(void)
 
 // ==================== ofApp::audioProcess ====================
@@ -528,3 +621,136 @@ int ofApp::RandomNumber(int min, int max) {
     std::uniform_int_distribution<> dist(min, max);
     return dist(gen);
 } // int ofApp::RandomNumber(int min, int max)
+
+// ==================== ofApp::SaveAndPrintMetrics ====================
+
+void ofApp::SaveAndPrintMetrics() {
+	if (procTimesMs.empty()) {
+		std::cout << "\nNot enough audio blocks recorded to compute statistics." << std::endl;
+		return;
+	}
+
+	double deadlineMs = (static_cast<double>(buffer_size) / static_cast<double>(SAMPLE_RATE)) * 1000.0;
+
+	// Helper lambda to compute stats over all recorded blocks
+	auto computeStats = [](const std::vector<double>& data, double thresholdMs) {
+		struct Stats {
+			double mean = 0.0, stdDev = 0.0, minVal = 0.0, p99 = 0.0, maxVal = 0.0;
+			std::size_t count = 0, overruns = 0;
+		} s;
+
+		if (data.empty()) return s;
+
+		std::vector<double> valid = data;
+		s.count = valid.size();
+
+		double sum = 0.0;
+		for (double v : valid) {
+			sum += v;
+			if (thresholdMs > 0.0 && v > thresholdMs) s.overruns++;
+		}
+		s.mean = sum / s.count;
+
+		double sqSum = 0.0;
+		for (double v : valid) {
+			sqSum += (v - s.mean) * (v - s.mean);
+		}
+		s.stdDev = std::sqrt(sqSum / s.count);
+
+		std::sort(valid.begin(), valid.end());
+		s.minVal = valid.front();
+		s.maxVal = valid.back();
+		std::size_t p99Idx = static_cast<std::size_t>(0.99 * (s.count - 1));
+		s.p99 = valid[p99Idx];
+
+		return s;
+	};
+
+	auto procStats = computeStats(procTimesMs, deadlineMs);
+	auto arrStats  = computeStats(arrivalTimesMs, 0.0);
+
+	double meanRtLoadPct = (procStats.mean / deadlineMs) * 100.0;
+	double p99RtLoadPct  = (procStats.p99 / deadlineMs) * 100.0;
+	double maxRtLoadPct  = (procStats.maxVal / deadlineMs) * 100.0;
+
+	// 1. Print report to console
+	std::cout << std::fixed << std::setprecision(3);
+	std::cout << "\n==================== PERFORMANCE REPORT ====================" << std::endl;
+	std::cout << "    Buffer size: " << buffer_size << " samples | Sample rate: " << SAMPLE_RATE << " Hz" << std::endl;
+	std::cout << "    Total sources: " << sourcesBRT.size() << " | Recorded blocks: " << procStats.count << std::endl;
+	std::cout << "    Audio Deadline (T_deadline): " << deadlineMs << " ms" << std::endl;
+	std::cout << "------------------------------------------------------------" << std::endl;
+	std::cout << "    [t_proc] Processing Time:" << std::endl;
+	std::cout << "      Mean: " << procStats.mean << " ms (" << meanRtLoadPct << "% RT Load)" << std::endl;
+	std::cout << "      StdDev (Jitter): " << procStats.stdDev << " ms" << std::endl;
+	std::cout << "      P99:  " << procStats.p99 << " ms (" << p99RtLoadPct << "% RT Load)" << std::endl;
+	std::cout << "      Max:  " << procStats.maxVal << " ms (" << maxRtLoadPct << "% RT Load)" << std::endl;
+	std::cout << "      Overruns (t_proc > T_deadline): " << procStats.overruns << " / " << procStats.count << std::endl;
+	std::cout << "------------------------------------------------------------" << std::endl;
+	std::cout << "    [dt_arrival] Callback Interval:" << std::endl;
+	std::cout << "      Mean: " << arrStats.mean << " ms | StdDev (Jitter): " << arrStats.stdDev << " ms" << std::endl;
+	std::cout << "      Min:  " << arrStats.minVal << " ms | Max: " << arrStats.maxVal << " ms" << std::endl;
+	std::cout << "============================================================" << std::endl;
+
+	// 2. Export self-contained block-by-block CSV (with commented summary header)
+	std::string csvName = "metrics_buf" + std::to_string(buffer_size) + "_src" + std::to_string(sourcesBRT.size()) + ".csv";
+	std::ofstream csvFile(csvName);
+	
+	if (csvFile.is_open()) {
+		csvFile << std::fixed << std::setprecision(4);
+		csvFile << "# buffer_size=" << buffer_size << ", sample_rate=" << SAMPLE_RATE
+		        << ", total_sources=" << sourcesBRT.size() << ", recorded_blocks=" << procStats.count
+		        << ", deadline_ms=" << deadlineMs << "\n";
+		csvFile << "# t_proc_mean_ms=" << procStats.mean << ", t_proc_std_ms=" << procStats.stdDev
+		        << ", t_proc_p99_ms=" << procStats.p99 << ", t_proc_max_ms=" << procStats.maxVal
+		        << ", overruns=" << procStats.overruns << "\n";
+		csvFile << "# rt_load_mean_pct=" << meanRtLoadPct << ", rt_load_p99_pct=" << p99RtLoadPct
+		        << ", rt_load_max_pct=" << maxRtLoadPct << "\n";
+		csvFile << "# dt_arrival_mean_ms=" << arrStats.mean << ", dt_arrival_std_ms=" << arrStats.stdDev
+		        << ", dt_arrival_min_ms=" << arrStats.minVal << ", dt_arrival_max_ms=" << arrStats.maxVal << "\n";
+
+		csvFile << "block,t_proc_ms,dt_arrival_ms,rt_load_pct\n";
+		std::size_t n = std::min(procTimesMs.size(), arrivalTimesMs.size());
+		for (std::size_t i = 0; i < n; ++i) {
+			csvFile << i << ","
+			        << procTimesMs[i] << ","
+			        << arrivalTimesMs[i] << ","
+			        << (procTimesMs[i] / deadlineMs) * 100.0 << "\n";
+		}
+		std::cout << "    Detailed CSV saved to: " << csvName << std::endl;
+	}
+
+	// 3. Append single summary row to global summary_results.csv
+	const std::string summaryName = "summary_results.csv";
+	bool fileExists = std::ifstream(summaryName).good();
+	std::ofstream summaryFile(summaryName, std::ios::app);
+
+	if (summaryFile.is_open()) {
+		summaryFile << std::fixed << std::setprecision(4);
+		if (!fileExists) {
+			summaryFile << "buffer_size,sample_rate,total_sources,recorded_blocks,deadline_ms,"
+			            << "t_proc_mean_ms,t_proc_std_ms,t_proc_p99_ms,t_proc_max_ms,"
+			            << "rt_load_mean_pct,rt_load_p99_pct,rt_load_max_pct,overruns,"
+			            << "dt_arrival_mean_ms,dt_arrival_std_ms,dt_arrival_min_ms,dt_arrival_max_ms\n";
+		}
+		summaryFile << buffer_size << ","
+		            << SAMPLE_RATE << ","
+		            << sourcesBRT.size() << ","
+		            << procStats.count << ","
+		            << deadlineMs << ","
+		            << procStats.mean << ","
+		            << procStats.stdDev << ","
+		            << procStats.p99 << ","
+		            << procStats.maxVal << ","
+		            << meanRtLoadPct << ","
+		            << p99RtLoadPct << ","
+		            << maxRtLoadPct << ","
+		            << procStats.overruns << ","
+		            << arrStats.mean << ","
+		            << arrStats.stdDev << ","
+		            << arrStats.minVal << ","
+		            << arrStats.maxVal << "\n";
+		std::cout << "    Summary appended to: " << summaryName << std::endl;
+	}
+
+} // void ofApp::SaveAndPrintMetrics()

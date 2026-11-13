@@ -1,9 +1,13 @@
 #pragma once
 
 #include "ofMain.h"
-#include <vector>
+
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
+#include <vector>
+
 #include <BRTLibrary.h>
 
 class ofApp : public ofBaseApp {
@@ -15,12 +19,15 @@ class ofApp : public ofBaseApp {
 		// OpenFrameworks
 		ofApp(int argc, char *argv[]);
 		void setup();
+		void update();
 		void exit();
 		void audioOut(float *outputBuffer, int bufferSize, int nChannels);
 	
 	private:
 		// === ATTRIBUTES ===
 		// Constants
+		static constexpr std::size_t WARMUP_BLOCKS = 10;
+
 		static constexpr int SAMPLE_RATE = 44100;
 		static constexpr int HRTF_RESAMPLING_STEP = 15;
 
@@ -41,6 +48,16 @@ class ofApp : public ofBaseApp {
 		int buffer_size = -1;
 		int num_src_steps = -1;
 		int device = -1;
+		int benchmark_sec = -1;
+
+		// Performance measurement
+		std::size_t currentBlockCount = 0;
+		std::size_t targetBlocks = 0;
+		std::atomic<bool> benchmarkFinished{false};
+		std::vector<double> procTimesMs;
+		std::vector<double> arrivalTimesMs;
+		std::chrono::steady_clock::time_point lastCallbackStart;
+		bool hasPreviousCallback = false;
 
 		// BRT
 		BRTBase::CBRTManager brtManager;
@@ -70,4 +87,7 @@ class ofApp : public ofBaseApp {
 		void FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector);
 		Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius);
 		int RandomNumber(int min, int max);
+
+		// Performance measurement
+		void SaveAndPrintMetrics();
 }; // class ofApp : public ofBaseApp
