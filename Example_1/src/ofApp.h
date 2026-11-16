@@ -13,21 +13,27 @@
 class ofApp : public ofBaseApp {
 
 	public:
+	
+		// ==================
 		// === ATTRIBUTES ===
+		// ==================
 
-		// === METHODS ===
+		// ==================
+		// === METHODS    ===
+		// ==================
+
 		// OpenFrameworks
 		ofApp(int argc, char *argv[]);
 		void setup();
-		void update();
 		void exit();
 		void audioOut(float *outputBuffer, int bufferSize, int nChannels);
 	
 	private:
+		// ==================
 		// === ATTRIBUTES ===
-		// Constants
-		static constexpr std::size_t WARMUP_BLOCKS = 10;
+		// ==================
 
+		// Constants
 		static constexpr int SAMPLE_RATE = 44100;
 		static constexpr int HRTF_RESAMPLING_STEP = 15;
 
@@ -48,16 +54,6 @@ class ofApp : public ofBaseApp {
 		int buffer_size = -1;
 		int num_src_steps = -1;
 		int device = -1;
-		int benchmark_sec = -1;
-
-		// Performance measurement
-		std::size_t currentBlockCount = 0;
-		std::size_t targetBlocks = 0;
-		std::atomic<bool> benchmarkFinished{false};
-		std::vector<double> procTimesMs;
-		std::vector<double> arrivalTimesMs;
-		std::chrono::steady_clock::time_point lastCallbackStart;
-		bool hasPreviousCallback = false;
 
 		// BRT
 		BRTBase::CBRTManager brtManager;
@@ -74,7 +70,10 @@ class ofApp : public ofBaseApp {
 		// OpenFrameworks
 		ofSoundStream systemSoundStream;
 
-		// === METHODS ===
+		// ==================
+		// === METHODS    ===
+		// ==================
+
 		// BRT
 		void AudioSetup(void);
 		void audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize);
@@ -88,6 +87,55 @@ class ofApp : public ofBaseApp {
 		Common::CVector3 Spherical2Cartesians(float azimuth, float elevation, float radius);
 		int RandomNumber(int min, int max);
 
+// *************************************
+// ********** BENCHMARK BEGIN **********
+// *************************************
+
+	public:
+
+		// ==================
+		// === ATTRIBUTES ===
+		// ==================
+
+		// ==================
+		// === METHODS    ===
+		// ==================
+
+		// OpenFrameworks
+		void update();
+
+	private:
+
+		// ==================
+		// === ATTRIBUTES ===
+		// ==================
+
+		// Constants
+		static constexpr std::size_t WARMUP_BLOCKS = 10;
+
+		// Parameters
+		int benchmark_sec = -1;
+
+		// Performance measurement
+		std::size_t currentBlockCount = 0;
+		std::size_t targetBlocks = 0;
+		std::atomic<bool> benchmarkFinished{false};
+		bool limitExceeded = false;
+		bool metricsAlreadySaved = false;
+		std::vector<double> procTimesMs;
+		std::vector<double> arrivalTimesMs;
+		std::chrono::steady_clock::time_point lastCallbackStart;
+		bool hasPreviousCallback = false;
+
+		// ==================
+		// === METHODS    ===
+		// ==================
+
 		// Performance measurement
 		void SaveAndPrintMetrics();
+
+// *************************************
+// ********** BENCHMARK END   **********
+// *************************************
+
 }; // class ofApp : public ofBaseApp
