@@ -24,7 +24,7 @@ tar -xf of_v0.12.1_linuxaarch64_release.tar.gz
 rm of_v0.12.1_linuxaarch64_release.tar.gz
 mv of_v0.12.1_linuxaarch64_release openFrameworks
 cd /home/pi/openFrameworks/scripts/linux/debian
-nano install_dependencies.sh -> [delete "libgconf-2-4"]
+nano install_dependencies.sh -> [delete "libgconf-2-4" if it fails, it is obsolete in new distributions]
 sudo ./install_dependencies.sh
 make Release -C /home/pi/openFrameworks/libs/openFrameworksCompiled/project
 ```
