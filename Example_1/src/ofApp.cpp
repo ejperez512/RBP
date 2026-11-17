@@ -257,7 +257,7 @@ void ofApp::setup() {
 void ofApp::update() {
 
 	if (benchmark_sec > 0 && benchmarkFinished.load()) {
-		ofExit();
+		this->exit();
 	}
 
 } // void ofApp::update()
@@ -266,8 +266,8 @@ void ofApp::update() {
 // ==================== ofApp::exit ====================
 
 void ofApp::exit() {
-    systemSoundStream.close();
     systemSoundStream.stop();
+	systemSoundStream.close();
 
 	// --- BENCHMARK END   ---
 	if (benchmark_sec > 0) {
@@ -277,6 +277,7 @@ void ofApp::exit() {
 			metricsAlreadySaved = true;
 		}
 		
+		std::cout << std::flush;		
 		std::exit(limitExceeded ? 1 : 0);
 	}
 	// --- BENCHMARK END   ---
