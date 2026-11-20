@@ -1,0 +1,47 @@
+# Windows (Cross Compiling in Windows for Raspberry Pi)
+
+PROJECT_ROOT     = $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+PROJECT_ROOT_WIN = $(subst /,\,$(PROJECT_ROOT))
+
+CC      = aarch64-linux-gnu-g++
+BRT     = C:/home/pi/brt
+SYSROOT = C:/home/pi/sysroot
+CFLAGS  += --sysroot=$(SYSROOT)
+LFLAGS  += --sysroot=$(SYSROOT)
+LFLAGS  += -L$(SYSROOT)/lib
+LFLAGS  += -L$(SYSROOT)/lib/aarch64-linux-gnu
+LFLAGS  += -L$(SYSROOT)/usr/lib
+LFLAGS  += -L$(SYSROOT)/usr/lib/aarch64-linux-gnu
+LFLAGS  += -Wl,-rpath-link,$(SYSROOT)/lib/aarch64-linux-gnu
+LFLAGS  += -Wl,-rpath-link,$(SYSROOT)/usr/lib/aarch64-linux-gnu
+
+INC_DIR += -I/usr/include/rtaudio
+INC_DIR += -I$(BRT)/include
+INC_DIR += -I$(BRT)/include/third_party_libraries/eigen
+
+LIB_A += $(BRT)/include/third_party_libraries/libmysofa/lib/aarch64/libmysofa.a
+
+ # Compila flags for Rpi4
+CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -mcpu=cortex-a72
+ # Compile flags for Rpi5
+#CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -mcpu=cortex-a76
+
+LFLAGS += -lrtaudio -lasound -ljack -lpthread
+
+all: rbp
+
+rbp: $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/RtApp.o
+	@if not exist $(PROJECT_ROOT_WIN)\bin mkdir $(PROJECT_ROOT_WIN)\bin
+	$(CC) -o $(PROJECT_ROOT)/bin/rbp $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/RtApp.o $(LIB_A) $(LFLAGS)
+
+$(PROJECT_ROOT)/build/main.o: $(PROJECT_ROOT)/src/main.cpp
+	@if not exist $(PROJECT_ROOT_WIN)\build mkdir $(PROJECT_ROOT_WIN)\build
+	$(CC) -c $(PROJECT_ROOT)/src/main.cpp -o $(PROJECT_ROOT)/build/main.o $(CFLAGS)
+
+$(PROJECT_ROOT)/build/RtApp.o: $(PROJECT_ROOT)/src/RtApp.h $(PROJECT_ROOT)/src/RtApp.cpp
+	@if not exist $(PROJECT_ROOT_WIN)\build mkdir $(PROJECT_ROOT_WIN)\build
+	$(CC) -c $(PROJECT_ROOT)/src/RtApp.cpp -o $(PROJECT_ROOT)/build/RtApp.o $(CFLAGS)
+
+clean:
+	@if exist $(PROJECT_ROOT_WIN)\build rmdir /s /q $(PROJECT_ROOT_WIN)\build
+	@if exist $(PROJECT_ROOT_WIN)\bin rmdir /s /q $(PROJECT_ROOT_WIN)\bin

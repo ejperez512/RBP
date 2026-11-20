@@ -1,0 +1,34 @@
+# Linux (Native Compiling in Linux for Raspberry Pi)
+
+PROJECT_ROOT = $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
+CC      = g++
+BRT     = /home/pi/brt
+
+INC_DIR += -I/usr/include/rtaudio
+INC_DIR += -I$(BRT)/include
+INC_DIR += -I$(BRT)/include/third_party_libraries/eigen
+
+LIB_A += $(BRT)/include/third_party_libraries/libmysofa/lib/aarch64/libmysofa.a
+
+CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -mcpu=cortex-a72
+
+LFLAGS += -lgstapp-1.0 -lgstvideo-1.0 -lgstbase-1.0 -lgstreamer-1.0 -ludev -lfontconfig -lfreetype -lsndfile -lopenal -lcurl -lglfw -lrtaudio -lpulse-simple -lpulse -pthread -lasound -lGLEW -lGL -lX11 -lGLU -lz -lharfbuzz -lcairo-gobject -lcairo -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lmpg123 -lGLESv1_CM -lGLESv2 -lEGL -lglut -lXrandr -lXxf86vm -lXi -lXcursor -ldl -lpthread -lfreeimage -lboost_filesystem -lboost_system -lpugixml -luriparser -lXinerama -Wl,--as-needed -Wl,--gc-sections -lstdc++fs -no-pie
+
+all: rbp
+
+rbp: $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/RtApp.o
+	@mkdir -p $(PROJECT_ROOT)/bin
+	$(CC) -o $(PROJECT_ROOT)/bin/rbp $(PROJECT_ROOT)/build/main.o $(PROJECT_ROOT)/build/RtApp.o $(LIB_A) $(LFLAGS)
+
+$(PROJECT_ROOT)/build/main.o: $(PROJECT_ROOT)/src/main.cpp
+	@mkdir -p $(PROJECT_ROOT)/build
+	$(CC) -c $(PROJECT_ROOT)/src/main.cpp -o $(PROJECT_ROOT)/build/main.o $(CFLAGS)
+
+$(PROJECT_ROOT)/build/RtApp.o: $(PROJECT_ROOT)/src/RtApp.h $(PROJECT_ROOT)/src/RtApp.cpp
+	@mkdir -p $(PROJECT_ROOT)/build
+	$(CC) -c $(PROJECT_ROOT)/src/RtApp.cpp -o $(PROJECT_ROOT)/build/RtApp.o $(CFLAGS)
+
+clean:
+	@rm -rf $(PROJECT_ROOT)/build
+	@rm -rf $(PROJECT_ROOT)/bin

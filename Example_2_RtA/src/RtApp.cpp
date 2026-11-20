@@ -1,0 +1,859 @@
+#include "RtApp.h"
+
+#include <cctype>   // std::toupper
+#include <cstdio>   // std::fopen, std::fread, std::fclose
+#include <cstring>  // std::memset
+#include <iostream> // std::cout, std::cin
+#include <random>   // std::random_device, std::mt19937
+
+// --- BENCHMARK BEGIN ---
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+// --- BENCHMARK END   ---
+
+// Static members for signal handling & main-thread sleep/wake
+std::atomic<bool> RtApp::quitRequested = false;
+std::mutex RtApp::wakeMutex;
+std::condition_variable RtApp::wakeCV;
+
+void RtApp::SignalHandler(int) {
+	quitRequested.store(true);
+	wakeCV.notify_all();
+}
+
+// ==================== RtApp::RtApp ====================
+
+RtApp::RtApp(int argc, char *argv[]) {
+	std::cout << std::endl;
+	std::cout << "Usage: " << argv[0] << " [buffer_size] [num_src_steps] [device] [benchmark_sec]" << std::endl;
+	std::cout << std::endl;
+
+	if (argc >= 2) {
+		buffer_size = std::atoi(argv[1]);
+
+		if (buffer_size <= 0) {
+			buffer_size = 2048;
+		} // if (buffer_size <= 0)
+
+	} // if (argc >= 2)
+
+	if (argc >= 3) {
+		num_src_steps = std::atoi(argv[2]);
+
+		if (num_src_steps < 0) {
+			num_src_steps = 0;
+		} // if (num_src_steps < 0)
+		
+	} // if (argc >= 3)
+
+	if (argc >= 4) {
+		device = std::toupper(argv[3][0]) - 'A';
+
+		if (device < 0) {
+			device = 0;
+		} // if (device < 0)
+
+	} // if (argc >= 4)
+
+	// --- BENCHMARK BEGIN ---
+	if (argc >= 5) {
+		benchmark_sec = std::atoi(argv[4]);
+
+		if (benchmark_sec <= 0) {
+			benchmark_sec = -1;
+		} // if (benchmark_sec <= 0)
+
+	} // if (argc >= 5)
+	// --- BENCHMARK END   ---
+
+} // RtApp::RtApp(int argc, char *argv[])
+
+// ==================== RtApp::~RtApp ====================
+
+RtApp::~RtApp() {
+	StopAudio();
+} // RtApp::~RtApp()
+
+// ==================== RtApp::run ====================
+
+void RtApp::run() {
+	int azi, ele, dst;
+	int cont_src_steps;
+
+	std::cout << "--- BUFFER SIZE ---" << std::endl;
+	std::cout << std::endl;
+
+	if (buffer_size == -1) {
+		std::cout << "    Enter buffer size (default is 2048): ";
+		std::cin >> buffer_size;
+		std::cout << std::endl;
+		
+		if (buffer_size <= 0) {
+			buffer_size = 2048;
+		} // if (buffer_size <= 0)
+
+	} // if (buffer_size == -1)
+
+	std::cout << "    Buffer size: " << buffer_size << std::endl;
+	std::cout << std::endl;
+
+	std::cout << "--- NUMBER OF SOURCES ---" << std::endl;
+	std::cout << std::endl;
+	std::cout << "    This application uses a 'speech' source and a configurable number of 'steps' sources at random positions." << std::endl;
+	std::cout << std::endl;
+
+	if (num_src_steps == -1) {
+		std::cout << "    Enter number of 'steps' sources: ";
+		std::cin >> num_src_steps;
+		std::cout << std::endl;
+
+		if (num_src_steps < 0) {
+			num_src_steps = 0;
+		} // if (num_src_steps < 0)
+		
+	} // if (num_src_steps == -1)
+
+	std::cout << "    Number of 'steps' sources: " << num_src_steps << std::endl;
+	std::cout << "    TOTAL number of sources: " << num_src_steps + 1 << std::endl;
+	std::cout << std::endl;
+
+	// #################### BRT SOURCE CODE BEGIN ####################
+	
+	globalParameters.SetSampleRate(SAMPLE_RATE);
+	globalParameters.SetBufferSize(buffer_size);
+
+	// --- LISTENER ---
+
+	// Create Listener
+	brtManager.BeginSetup();
+	listenerBRT = brtManager.CreateListener<BRTBase::CListener>("listener");
+	brtManager.EndSetup();
+	// Set Listener position
+	Common::CTransform listenerBRT_pos = Common::CTransform();
+	listenerBRT_pos.SetPosition(Spherical2Cartesians(LISTENER_AZIMUTH, LISTENER_ELEVATION, LISTENER_DISTANCE));
+	listenerBRT->SetListenerTransform(listenerBRT_pos);
+
+	// --- LISTENERMODEL ---
+
+	// Create Listener Model
+	brtManager.BeginSetup();
+	listenerMODEL = brtManager.CreateListenerModel<BRTListenerModel::CListenerDirectHRTFConvolutionModel>("listenerMODEL");
+	brtManager.EndSetup();
+
+	// --- LISTENERMODEL -> LISTENERS
+
+	brtManager.BeginSetup();
+	listenerBRT->ConnectListenerModel(listenerMODEL);
+	brtManager.EndSetup();
+
+	// Load HRTF
+
+	std::cout << "--- LOADING FILES ---" << std::endl;
+	std::cout << std::endl;
+
+	std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf = std::make_shared<BRTServices::CSphericalInterpolatedFIRTable>();
+	LoadSofaFile(HRTF_FILE, hrtf);
+	// Set HRTF
+	listenerBRT->SetHRTF(hrtf);
+	// Load ILD
+	std::shared_ptr<BRTServices::CSphericalSOSTable> sosFilter = std::make_shared<BRTServices::CSphericalSOSTable>();
+	LoadILD(ILD_FILE, sosFilter);
+	// Set ILD
+	listenerBRT->SetNearFieldCompensationFilters(sosFilter);
+
+	// === MULTISOURCES ===
+
+	std::cout << std::endl;
+	std::cout << "--- CREATING SOURCES ---" << std::endl;
+	std::cout << std::endl;
+
+	// --- SOURCE SPEECH [OMNIDIRECTIONAL]
+
+	// Create Source 'speech'
+
+	brtManager.BeginSetup();
+	sourcesBRT.push_back(brtManager.CreateSoundSource<BRTSourceModel::CSourceOmnidirectionalModel>("speech"));
+	brtManager.EndSetup();
+
+	// --- SOURCE -> LISTENER MODEL
+
+	brtManager.BeginSetup();
+	listenerMODEL->ConnectSoundSource(sourcesBRT.back());
+	brtManager.EndSetup();
+
+	// --- SOURCE POSITION
+
+	// Set Source position
+	Common::CTransform sourceBRT_pos = Common::CTransform();
+	sourceBRT_pos.SetPosition(Spherical2Cartesians(SRC_SPEECH_AZIMUTH, SRC_SPEECH_ELEVATION, SRC_SPEECH_DISTANCE));
+	sourcesBRT.back()->SetSourceTransform(sourceBRT_pos);
+	std::cout << "    Source 'speech' position: [AZI: " << SRC_SPEECH_AZIMUTH << " ; ELE: " << SRC_SPEECH_ELEVATION << " ; DST: " << SRC_SPEECH_DISTANCE << "]" << std::endl;
+
+	// --- SOURCE WAV
+
+	// Load Source wave
+	samplesVectorSources.push_back(std::vector<float>());
+	LoadWav(samplesVectorSources.back(), SRC_SPEECH_FILE);
+
+	// --- SOURCES STEPS [OMNIDIRECTIONAL]
+
+	for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++) {
+
+		// Create Source 'steps'
+
+		brtManager.BeginSetup();
+		sourcesBRT.push_back(brtManager.CreateSoundSource<BRTSourceModel::CSourceOmnidirectionalModel>("steps" + std::to_string(cont_src_steps+1)));
+		brtManager.EndSetup();
+
+		// --- SOURCE -> LISTENER MODEL
+
+		brtManager.BeginSetup();
+		listenerMODEL->ConnectSoundSource(sourcesBRT.back());
+		brtManager.EndSetup();
+
+		// --- SOURCE POSITION
+
+		// Set Source position
+		Common::CTransform sourceNBRT_pos = Common::CTransform();
+		azi = RandomNumber(-180, 180);
+		ele = RandomNumber(-90, 90);
+		dst = RandomNumber(1, 5);
+		sourceNBRT_pos.SetPosition(Spherical2Cartesians(azi, ele, dst));
+		sourcesBRT.back()->SetSourceTransform(sourceNBRT_pos);
+		std::cout << "    Source 'steps' [#" << cont_src_steps+1 << "] position: [AZI: " << azi << " ; ELE: " << ele << " ; DST: " << dst << "]" << std::endl;
+
+		// --- SOURCE WAV
+
+		// Load Source wave
+		samplesVectorSources.push_back(std::vector<float>());
+		LoadWav(samplesVectorSources.back(), SRC_STEPS_FILE);
+	} // for (cont_src_steps = 0; cont_src_steps < num_src_steps; cont_src_steps++)
+
+	sourceInputBuffers.resize(sourcesBRT.size(), CMonoBuffer<float>(buffer_size));
+	wavSamplePositions.resize(sourcesBRT.size(), 0);
+
+	// =====================
+	// === AUDIO PROCESS ===
+	// =====================
+
+  	outputBufferStereo.left.resize(buffer_size);
+  	outputBufferStereo.right.resize(buffer_size);
+
+	bufferProcessed.left.resize(buffer_size);
+	bufferProcessed.right.resize(buffer_size);
+
+	// #################### BRT SOURCE CODE END ####################
+
+	// --- BENCHMARK BEGIN ---
+	if (benchmark_sec > 0) {
+		double blocksPerSec = static_cast<double>(SAMPLE_RATE) / static_cast<double>(buffer_size);
+		targetBlocks = static_cast<std::size_t>(benchmark_sec * blocksPerSec);
+		procTimesMs.reserve(targetBlocks);
+		arrivalTimesMs.reserve(targetBlocks);
+		currentBlockCount = 0;
+		hasPreviousCallback = false;
+		benchmarkFinished.store(false);
+		limitExceeded = false;
+		metricsAlreadySaved = false;
+	}  // if (benchmark_sec > 0)
+	// --- BENCHMARK END   ---
+
+	AudioSetup();
+
+	{
+		std::unique_lock<std::mutex> lock(wakeMutex);
+		wakeCV.wait(lock, [this] {
+			return (benchmarkFinished.load() || quitRequested.load());
+		});
+	}
+
+	StopAudio();
+
+	if (quitRequested.load()) {
+		return 1;
+	} // if (quitRequested.load())
+
+	if (benchmark_sec > 0) {
+		SaveAndPrintMetrics();
+		return limitExceeded ? 1 : 0;
+	} // if (benchmark_sec > 0)
+
+} // void RtApp::run()
+
+// --- BENCHMARK BEGIN ---
+// ==================== RtApp::update ====================
+
+void RtApp::update() {
+
+	if (benchmark_sec > 0 && benchmarkFinished.load()) {
+		this->exit();
+	}
+
+} // void RtApp::update()
+// --- BENCHMARK END   ---
+
+// ==================== RtApp::exit ====================
+
+void RtApp::exit() {
+    systemSoundStream.stop();
+	systemSoundStream.close();
+
+	// --- BENCHMARK END   ---
+	if (benchmark_sec > 0) {
+
+		if (!metricsAlreadySaved) {
+			SaveAndPrintMetrics();
+			metricsAlreadySaved = true;
+		}
+		
+		std::cout << std::flush;		
+		std::exit(limitExceeded ? 1 : 0);
+	}
+	// --- BENCHMARK END   ---
+
+} // void RtApp::exit()
+
+// ==================== RtApp::audioOut ====================
+
+void RtApp::audioOut(float *outputBuffer, int bufferSize, int nChannels) {
+	// Zero-fill entire output buffer first (important if nChannels > 2)
+	std::memset(outputBuffer, 0, static_cast<std::size_t>(bufferSize * nChannels) * sizeof(float));
+
+	if (benchmarkFinished.load() || quitRequested.load()) {
+		return;
+	}
+
+	auto callbackStart = std::chrono::steady_clock::now();
+
+	// Measure inter-callback arrival time (after warmup)
+	double arrivalMs = 0.0;
+	if (hasPreviousCallback) {
+		arrivalMs = std::chrono::duration<double, std::milli>(callbackStart - lastCallbackStart).count();
+	}
+	lastCallbackStart = callbackStart;
+	hasPreviousCallback = true;
+
+	// Process spatial audio through BRT
+	audioProcess(outputBufferStereo, bufferSize);
+
+	// Interleave stereo output into RtAudio buffer
+	for (int i = 0; i < bufferSize; ++i) {
+		if (nChannels >= 1) outputBuffer[i * nChannels + 0] = outputBufferStereo.left[i];
+		if (nChannels >= 2) outputBuffer[i * nChannels + 1] = outputBufferStereo.right[i];
+	}
+
+	auto callbackEnd = std::chrono::steady_clock::now();
+	double procMs = std::chrono::duration<double, std::milli>(callbackEnd - callbackStart).count();
+
+	// Benchmark recording
+	if (benchmark_sec > 0) {
+		if (currentBlockCount >= WARMUP_BLOCKS) {
+			procTimesMs.push_back(procMs);
+			arrivalTimesMs.push_back(arrivalMs);
+		}
+		currentBlockCount++;
+
+		if (currentBlockCount >= WARMUP_BLOCKS + targetBlocks) {
+			benchmarkFinished.store(true);
+			wakeCV.notify_all();
+		}
+	}
+} // void RtApp::audioOut(float *outputBuffer, int bufferSize, int nChannels)
+
+// ==================== RtApp::AudioSetup ====================
+
+void RtApp::AudioSetup() {
+	try {
+		systemSoundStream = std::make_unique<RtAudio>();
+	} catch (const std::exception &e) {
+		std::cerr << "Error initializing RtAudio: " << e.what() << std::endl;
+		std::exit(1);
+	}
+
+	// Silence ALSA/JACK stderr noise while probing devices
+	fflush(stderr);
+	int savedStderr = dup(STDERR_FILENO);
+	int devNull = open("/dev/null", O_WRONLY);
+	if (devNull != -1) {
+		dup2(devNull, STDERR_FILENO);
+		close(devNull);
+	}
+
+	std::vector<SoundDeviceInfo> deviceList;
+	std::vector<unsigned int> deviceIds = systemSoundStream->getDeviceIds();
+	unsigned int defaultOutId = systemSoundStream->getDefaultOutputDevice();
+
+	for (unsigned int id : deviceIds) {
+		RtAudio::DeviceInfo info = systemSoundStream->getDeviceInfo(id);
+		if (info.outputChannels > 0) {
+			SoundDeviceInfo dev;
+			dev.deviceID = id;
+			dev.name = info.name;
+			dev.outputChannels = info.outputChannels;
+			dev.inputChannels = info.inputChannels;
+			dev.isDefaultOutput = (id == defaultOutId);
+			deviceList.push_back(dev);
+		}
+	}
+
+	// Restore stderr
+	fflush(stderr);
+	if (savedStderr != -1) {
+		dup2(savedStderr, STDERR_FILENO);
+		close(savedStderr);
+	}
+
+	if (deviceList.empty()) {
+		std::cerr << "No audio output devices found!" << std::endl;
+		std::exit(1);
+	}
+
+	int selectedIndex = -1;
+	if (device >= 0) {
+		for (std::size_t i = 0; i < deviceList.size(); ++i) {
+			if (static_cast<int>(deviceList[i].deviceID) == device) {
+				selectedIndex = static_cast<int>(i);
+				break;
+			}
+		}
+		if (selectedIndex < 0) {
+			std::cerr << "Requested device ID " << device << " not found. Falling back to selection menu." << std::endl;
+		}
+	}
+
+	if (selectedIndex < 0) {
+		selectedIndex = GetAudioDeviceIndex(deviceList);
+	}
+
+	const SoundDeviceInfo &chosenDevice = deviceList[selectedIndex];
+	activeOutputChannels = std::min<unsigned int>(2, chosenDevice.outputChannels);
+	if (chosenDevice.outputChannels > 2) {
+		// Some ALSA hardware devices require opening all physical channels
+		activeOutputChannels = chosenDevice.outputChannels;
+	}
+
+	RtAudio::StreamParameters outParams;
+	outParams.deviceId = chosenDevice.deviceID;
+	outParams.nChannels = activeOutputChannels;
+	outParams.firstChannel = 0;
+
+	unsigned int bufferFrames = static_cast<unsigned int>(buffer_size);
+
+	std::cout << "Opening audio device [" << chosenDevice.deviceID << "] "
+	          << chosenDevice.name << " (" << activeOutputChannels << " ch, "
+	          << SAMPLE_RATE << " Hz, buffer " << bufferFrames << ")..." << std::endl;
+
+	// Silence ALSA/JACK stderr noise while opening/starting stream
+	fflush(stderr);
+	savedStderr = dup(STDERR_FILENO);
+	devNull = open("/dev/null", O_WRONLY);
+	if (devNull != -1) {
+		dup2(devNull, STDERR_FILENO);
+		close(devNull);
+	}
+
+	try {
+		systemSoundStream->openStream(&outParams, nullptr, RTAUDIO_FLOAT32,
+		                              SAMPLE_RATE, &bufferFrames,
+		                              &RtApp::RtAudioCallback, this);
+		if (static_cast<int>(bufferFrames) != buffer_size) {
+			// Restore stderr before printing warning
+			fflush(stderr);
+			if (savedStderr != -1) {
+				dup2(savedStderr, STDERR_FILENO);
+				close(savedStderr);
+				savedStderr = -1;
+			}
+			std::cerr << "Warning: requested buffer size " << buffer_size
+			          << " but audio driver assigned " << bufferFrames << "." << std::endl;
+		}
+		systemSoundStream->startStream();
+	} catch (const std::exception &e) {
+		fflush(stderr);
+		if (savedStderr != -1) {
+			dup2(savedStderr, STDERR_FILENO);
+			close(savedStderr);
+		}
+		std::cerr << "RtAudio stream error: " << e.what() << std::endl;
+		std::exit(1);
+	}
+
+	// Restore stderr if still redirected
+	fflush(stderr);
+	if (savedStderr != -1) {
+		dup2(savedStderr, STDERR_FILENO);
+		close(savedStderr);
+	}
+} // void RtApp::AudioSetup()
+
+// ==================== RtApp::StopAudio ====================
+
+void RtApp::StopAudio() {
+	if (systemSoundStream) {
+		try {
+			if (systemSoundStream->isStreamRunning()) {
+				systemSoundStream->stopStream();
+			}
+			if (systemSoundStream->isStreamOpen()) {
+				systemSoundStream->closeStream();
+			}
+		} catch (const std::exception &e) {
+			std::cerr << "Warning while stopping RtAudio stream: " << e.what() << std::endl;
+		}
+	}
+} // void RtApp::StopAudio()
+
+// ==================== RtApp::audioProcess ====================
+
+void RtApp::audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize) {
+	bufferOutput.left.Fill(bufferSize, 0.0f);
+	bufferOutput.right.Fill(bufferSize, 0.0f);
+
+	for (std::size_t i = 0; i < sourcesBRT.size(); ++i) {
+		FillBuffer(sourceInputBuffers[i], wavSamplePositions[i], samplesVectorSources[i]);
+		sourcesBRT[i]->SetBuffer(sourceInputBuffers[i]);
+	}
+
+	brtManager.ProcessAll();
+	listenerBRT->GetBuffers(bufferProcessed.left, bufferProcessed.right);
+
+	bufferOutput.left += bufferProcessed.left;
+	bufferOutput.right += bufferProcessed.right;
+} // void RtApp::audioProcess(Common::CEarPair<CMonoBuffer<float>> &bufferOutput, int bufferSize)
+
+// ==================== RtApp::GetAudioDeviceIndex ====================
+
+int RtApp::GetAudioDeviceIndex(std::vector<SoundDeviceInfo> list) {
+	std::cout << "\nAvailable audio output devices:" << std::endl;
+	for (std::size_t i = 0; i < list.size(); ++i) {
+		std::cout << "  [" << i << "] ID=" << list[i].deviceID
+		          << " | " << list[i].name
+		          << " (out: " << list[i].outputChannels << " ch)"
+		          << (list[i].isDefaultOutput ? " [DEFAULT]" : "")
+		          << std::endl;
+	}
+
+	int choice = -1;
+	while (choice < 0 || choice >= static_cast<int>(list.size())) {
+		std::cout << "Select device index [0-" << (list.size() - 1) << "]: ";
+		std::cin >> choice;
+	}
+	return choice;
+} // int RtApp::GetAudioDeviceIndex(std::vector<SoundDeviceInfo> list)
+
+// ==================== RtApp::RtAudioCallback ====================
+
+int RtApp::RtAudioCallback(void *outputBuffer, void * /*inputBuffer*/, unsigned int nFrames,
+                           double /*streamTime*/, RtAudioStreamStatus status, void *userData) {
+	if (status & RTAUDIO_OUTPUT_UNDERFLOW) {
+		std::cerr << "[RtAudio] Warning: Output underflow detected!" << std::endl;
+	}
+
+	auto *app = static_cast<RtApp *>(userData);
+	if (app && outputBuffer) {
+		app->audioOut(static_cast<float *>(outputBuffer),
+		              static_cast<int>(nFrames),
+		              static_cast<int>(app->activeOutputChannels));
+	}
+	return 0;
+} // int RtApp::RtAudioCallback(void *outputBuffer, void * /*inputBuffer*/, unsigned int nFrames, double /*streamTime*/, RtAudioStreamStatus status, void *userData)
+
+// ==================== RtApp::LoadWav ====================
+
+void RtApp::LoadWav(std::vector<float> &samplesVector, const char *stringIn) {
+	struct WavHeader {
+		char		fill[40];
+		uint32_t	bytesCount;
+	} wavHeader;
+
+	FILE* wavFile = std::fopen(stringIn, "rb");
+
+	if (!wavFile) {
+		std::cout << "    Error loading WAV file [" << stringIn << "]" << std::endl;
+		return;
+	} // if (!wavFile)
+
+	std::cout << "    Loading WAV File [" << stringIn << "]: ";
+	std::fread(&wavHeader, sizeof(wavHeader), 1, wavFile);
+	std::fseek(wavFile, sizeof(wavHeader), SEEK_SET);
+
+	unsigned int samplesCount = wavHeader.bytesCount / 2;
+	int16_t *sample = new int16_t[samplesCount];
+	std::memset(sample, 0, sizeof(int16_t) * samplesCount);
+
+	uint8_t *byteSample = new uint8_t[2 * samplesCount];
+	std::memset(byteSample, 0, sizeof(uint8_t) * 2 * samplesCount);
+
+	std::fread(byteSample, 1, 2 * samplesCount, wavFile);
+	std::fclose(wavFile);
+
+	for (int i = 0; i < samplesCount; i++) {
+		sample[i] = int16_t(byteSample[2 * i] | byteSample[2 * i + 1] << 8);
+	} // for (int i = 0; i < samplesCount; i++)
+	
+	samplesVector.reserve(samplesCount);
+
+	for (int i = 0; i < samplesCount; i++)
+		samplesVector.push_back((float)sample[i] / (float)INT16_MAX);
+
+	delete[] sample;
+	delete[] byteSample;
+
+	std::cout << "successful!" << std::endl; 
+} // void RtApp::LoadWav(std::vector<float> &samplesVector, const char *stringIn)
+
+// ==================== RtApp::LoadSofaFile ====================
+
+bool RtApp::LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf) {
+	BRTReaders::CSOFAReader sofaReader;
+
+	int sampleRateInSOFAFile = sofaReader.GetSampleRateFromSofa(_filePath);
+
+	if (sampleRateInSOFAFile == -1) {
+		std::cout << "    Error loading SOFA file [" << _filePath << "]" << std::endl;
+		return false;
+	} // if (sampleRateInSOFAFile == -1)
+
+	if (globalParameters.GetSampleRate() != sampleRateInSOFAFile) {
+		std::cout << "    The sample rate in SOFA file doesn't match the configuration." << std::endl;
+		return false;
+	} // if (globalParameters.GetSampleRate() != sampleRateInSOFAFile)
+
+	std::cout << "    Loading SOFA File [" << _filePath << "]: ";
+	bool result = sofaReader.ReadHRTFFromSofa(_filePath, "", hrtf, HRTF_RESAMPLING_STEP, BRTServices::TEXTRAPOLATION_METHOD::nearest_point);
+
+	if (result) {
+		std::cout << "successful!" << std::endl;            
+		return true;
+	} // if (result)
+
+	else {
+		std::cout << "ERROR!" << std::endl;
+		return false;
+	} // else: if (result)
+	
+} // bool RtApp::LoadSofaFile(const std::string &_filePath, std::shared_ptr<BRTServices::CSphericalInterpolatedFIRTable> hrtf)
+
+// ==================== RtApp::LoadILD ====================
+
+bool RtApp::LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter) {
+	BRTReaders::CSOFAReader sofaReader;
+	
+	int sampleRateInSOFAFile = sofaReader.GetSampleRateFromSofa(_ildFilePath);
+
+	if (sampleRateInSOFAFile == -1) {
+		std::cout << "    Error loading ILD file [" << _ildFilePath << "]" << std::endl;
+		return false;
+	} // if (sampleRateInSOFAFile == -1)
+
+	if (globalParameters.GetSampleRate() != sampleRateInSOFAFile) {
+		std::cout << "    The sample rate in ILD file doesn't match the configuration." << std::endl;
+		return false;
+	} // if (globalParameters.GetSampleRate() != sampleRateInSOFAFile)
+	
+	std::cout << "    Loading ILD File [" << _ildFilePath << "]: ";
+	bool result = sofaReader.ReadSOSFiltersFromSofa(_ildFilePath, _sosFilter);
+
+	if (result) {
+		std::cout << "successful!" << std::endl;            
+		return true;
+	} // if (result)
+
+	else {
+		std::cout << "ERROR!" << std::endl;
+		return false;
+	} // else: if (result)
+
+} // bool RtApp::LoadILD(std::string _ildFilePath, std::shared_ptr<BRTServices::CSphericalSOSTable> _sosFilter)
+
+// ==================== RtApp::FillBuffer ====================
+
+void RtApp::FillBuffer(CMonoBuffer<float> &output, unsigned int &position, std::vector<float> &samplesVector) {
+
+	if (position >= samplesVector.size()) {
+		position = 0;
+	} // if (position >= samplesVector.size())
+
+	for (int i = 0; i < output.size(); i++) {
+
+		if ((position + i) < samplesVector.size()) {
+			output[i] = (samplesVector[position + i]);
+		} // if ((position + i) < samplesVector.size())
+
+		else {
+			output[i] = 0.0f;
+		} // else: if ((position + i) < samplesVector.size())
+
+	}  // for (int i = 0; i < output.size(); i++)
+
+	position += output.size();
+} // void RtApp::FillBuffer(CMonoBuffer<float> &output, unsigned int &position, unsigned int &endFrame, std::vector<float> &samplesVector)
+
+// ==================== RtApp::Spherical2Cartesians ====================
+
+Common::CVector3 RtApp::Spherical2Cartesians(float azimuth, float elevation, float radius) {
+	Common::CVector3 pos;
+
+	pos.x = (float) radius * std::cos(azimuth) * std::cos(elevation);
+	pos.y = (float) radius * std::sin(azimuth) * std::cos(elevation);
+	pos.z = (float) radius * std::sin(elevation);
+
+	return pos;
+} // Common::CVector3 RtApp::Spherical2Cartesians(float azimuth, float elevation, float radius)
+
+// ==================== RtApp::RandomNumber ====================
+
+int RtApp::RandomNumber(int min, int max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dist(min, max);
+    return dist(gen);
+} // int RtApp::RandomNumber(int min, int max)
+
+// --- BENCHMARK BEGIN ---
+// ==================== RtApp::SaveAndPrintMetrics ====================
+
+void RtApp::SaveAndPrintMetrics() {
+	if (procTimesMs.empty()) {
+		std::cout << "\nNot enough audio blocks recorded to compute statistics." << std::endl;
+		return;
+	}
+
+	double deadlineMs = (static_cast<double>(buffer_size) / static_cast<double>(SAMPLE_RATE)) * 1000.0;
+
+	// Helper lambda to compute stats over all recorded blocks
+	auto computeStats = [](const std::vector<double>& data, double thresholdMs) {
+		struct Stats {
+			double mean = 0.0, stdDev = 0.0, minVal = 0.0, p99 = 0.0, maxVal = 0.0;
+			std::size_t count = 0, overruns = 0;
+		} s;
+
+		if (data.empty()) return s;
+
+		std::vector<double> valid = data;
+		s.count = valid.size();
+
+		double sum = 0.0;
+		for (double v : valid) {
+			sum += v;
+			if (thresholdMs > 0.0 && v > thresholdMs) s.overruns++;
+		}
+		s.mean = sum / s.count;
+
+		double sqSum = 0.0;
+		for (double v : valid) {
+			sqSum += (v - s.mean) * (v - s.mean);
+		}
+		s.stdDev = std::sqrt(sqSum / s.count);
+
+		std::sort(valid.begin(), valid.end());
+		s.minVal = valid.front();
+		s.maxVal = valid.back();
+		std::size_t p99Idx = static_cast<std::size_t>(0.99 * (s.count - 1));
+		s.p99 = valid[p99Idx];
+
+		return s;
+	};
+
+	auto procStats = computeStats(procTimesMs, deadlineMs);
+	auto arrStats  = computeStats(arrivalTimesMs, 0.0);
+
+	double meanRtLoadPct = (procStats.mean / deadlineMs) * 100.0;
+	double p99RtLoadPct  = (procStats.p99 / deadlineMs) * 100.0;
+	double maxRtLoadPct  = (procStats.maxVal / deadlineMs) * 100.0;
+
+	limitExceeded = (procStats.overruns > 0) || (p99RtLoadPct >= 100.0);
+
+	auto fmtNum = [](double val) {
+		std::ostringstream oss;
+		oss << std::fixed << std::setprecision(4) << val;
+		std::string s = oss.str();
+		std::replace(s.begin(), s.end(), '.', ',');
+		return s;
+	};
+
+	// 1. Print report to console
+	std::cout << std::fixed << std::setprecision(3);
+	std::cout << "\n==================== PERFORMANCE REPORT ====================" << std::endl;
+	std::cout << "    Buffer size: " << buffer_size << " samples | Sample rate: " << SAMPLE_RATE << " Hz" << std::endl;
+	std::cout << "    Total sources: " << sourcesBRT.size() << " | Recorded blocks: " << procStats.count << std::endl;
+	std::cout << "    Audio Deadline (T_deadline): " << deadlineMs << " ms" << std::endl;
+	std::cout << "------------------------------------------------------------" << std::endl;
+	std::cout << "    [t_proc] Processing Time:" << std::endl;
+	std::cout << "      Mean: " << procStats.mean << " ms (" << meanRtLoadPct << "% RT Load)" << std::endl;
+	std::cout << "      StdDev (Jitter): " << procStats.stdDev << " ms" << std::endl;
+	std::cout << "      P99:  " << procStats.p99 << " ms (" << p99RtLoadPct << "% RT Load)" << std::endl;
+	std::cout << "      Max:  " << procStats.maxVal << " ms (" << maxRtLoadPct << "% RT Load)" << std::endl;
+	std::cout << "      Overruns (t_proc > T_deadline): " << procStats.overruns << " / " << procStats.count << std::endl;
+	std::cout << "------------------------------------------------------------" << std::endl;
+	std::cout << "    [dt_arrival] Callback Interval:" << std::endl;
+	std::cout << "      Mean: " << arrStats.mean << " ms | StdDev (Jitter): " << arrStats.stdDev << " ms" << std::endl;
+	std::cout << "      Min:  " << arrStats.minVal << " ms | Max: " << arrStats.maxVal << " ms" << std::endl;
+	std::cout << "------------------------------------------------------------" << std::endl;
+	std::cout << "    STATUS: " << (limitExceeded ? "LIMIT EXCEEDED (EXIT 1)" : "STABLE (EXIT 0)") << std::endl;
+	std::cout << "============================================================" << std::endl;
+
+	// 2. Export self-contained block-by-block CSV (with commented summary header)
+	std::string csvName = "metrics_buf" + std::to_string(buffer_size) + "_src" + std::to_string(sourcesBRT.size()) + ".csv";
+	std::ofstream csvFile(csvName);
+
+	if (csvFile.is_open()) {
+		csvFile << "# buffer_size=" << buffer_size << "; sample_rate=" << SAMPLE_RATE
+		        << "; total_sources=" << sourcesBRT.size() << "; recorded_blocks=" << procStats.count
+		        << "; deadline_ms=" << fmtNum(deadlineMs) << "\n";
+		csvFile << "# t_proc_mean_ms=" << fmtNum(procStats.mean) << "; t_proc_std_ms=" << fmtNum(procStats.stdDev)
+		        << "; t_proc_p99_ms=" << fmtNum(procStats.p99) << "; t_proc_max_ms=" << fmtNum(procStats.maxVal)
+		        << "; overruns=" << procStats.overruns << "\n";
+		csvFile << "# rt_load_mean_pct=" << fmtNum(meanRtLoadPct) << "; rt_load_p99_pct=" << fmtNum(p99RtLoadPct)
+		        << "; rt_load_max_pct=" << fmtNum(maxRtLoadPct) << "\n";
+		csvFile << "# dt_arrival_mean_ms=" << fmtNum(arrStats.mean) << "; dt_arrival_std_ms=" << fmtNum(arrStats.stdDev)
+		        << "; dt_arrival_min_ms=" << fmtNum(arrStats.minVal) << "; dt_arrival_max_ms=" << fmtNum(arrStats.maxVal) << "\n";
+
+		csvFile << "block;t_proc_ms;dt_arrival_ms;rt_load_pct\n";
+		std::size_t n = std::min(procTimesMs.size(), arrivalTimesMs.size());
+		for (std::size_t i = 0; i < n; ++i) {
+			csvFile << i << ";"
+			        << fmtNum(procTimesMs[i]) << ";"
+			        << fmtNum(arrivalTimesMs[i]) << ";"
+			        << fmtNum((procTimesMs[i] / deadlineMs) * 100.0) << "\n";
+		}
+		std::cout << "    Detailed CSV saved to: " << csvName << std::endl;
+	}
+
+	// 3. Append single summary row to global summary_results.csv
+	const std::string summaryName = "summary_results.csv";
+	bool fileExists = std::ifstream(summaryName).good();
+	std::ofstream summaryFile(summaryName, std::ios::app);
+	if (summaryFile.is_open()) {
+		if (!fileExists) {
+			summaryFile << "buffer_size;sample_rate;total_sources;recorded_blocks;deadline_ms;"
+			            << "t_proc_mean_ms;t_proc_std_ms;t_proc_p99_ms;t_proc_max_ms;"
+			            << "rt_load_mean_pct;rt_load_p99_pct;rt_load_max_pct;overruns;"
+			            << "dt_arrival_mean_ms;dt_arrival_std_ms;dt_arrival_min_ms;dt_arrival_max_ms\n";
+		}
+		summaryFile << buffer_size << ";"
+		            << SAMPLE_RATE << ";"
+		            << sourcesBRT.size() << ";"
+		            << procStats.count << ";"
+		            << fmtNum(deadlineMs) << ";"
+		            << fmtNum(procStats.mean) << ";"
+		            << fmtNum(procStats.stdDev) << ";"
+		            << fmtNum(procStats.p99) << ";"
+		            << fmtNum(procStats.maxVal) << ";"
+		            << fmtNum(meanRtLoadPct) << ";"
+		            << fmtNum(p99RtLoadPct) << ";"
+		            << fmtNum(maxRtLoadPct) << ";"
+		            << procStats.overruns << ";"
+		            << fmtNum(arrStats.mean) << ";"
+		            << fmtNum(arrStats.stdDev) << ";"
+		            << fmtNum(arrStats.minVal) << ";"
+		            << fmtNum(arrStats.maxVal) << "\n";
+		std::cout << "    Summary appended to: " << summaryName << std::endl;
+	}
+
+} // void RtApp::SaveAndPrintMetrics()
+// --- BENCHMARK END   ---
