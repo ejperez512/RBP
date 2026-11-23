@@ -21,9 +21,9 @@ INC_DIR += -I$(BRT)/include/third_party_libraries/eigen
 
 LIB_A += $(BRT)/include/third_party_libraries/libmysofa/lib/aarch64/libmysofa.a
 
- # Compila flags for Rpi4
+# Compile flags for Rpi4
 CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -mcpu=cortex-a72
- # Compile flags for Rpi5
+# Compile flags for Rpi5
 #CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -mcpu=cortex-a76
 
 LFLAGS += -lrtaudio -lasound -ljack -lpthread
