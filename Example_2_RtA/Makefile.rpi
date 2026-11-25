@@ -11,7 +11,7 @@ INC_DIR += -I$(BRT)/include/third_party_libraries/eigen
 
 LIB_A += $(BRT)/include/third_party_libraries/libmysofa/lib/aarch64/libmysofa.a
 
-CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -mcpu=cortex-a72
+CFLAGS += $(INC_DIR) -std=c++17 -O3 -DNDEBUG -march=native
 
 LFLAGS += -lgstapp-1.0 -lgstvideo-1.0 -lgstbase-1.0 -lgstreamer-1.0 -ludev -lfontconfig -lfreetype -lsndfile -lopenal -lcurl -lglfw -lrtaudio -lpulse-simple -lpulse -pthread -lasound -lGLEW -lGL -lX11 -lGLU -lz -lharfbuzz -lcairo-gobject -lcairo -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lmpg123 -lGLESv1_CM -lGLESv2 -lEGL -lglut -lXrandr -lXxf86vm -lXi -lXcursor -ldl -lpthread -lfreeimage -lboost_filesystem -lboost_system -lpugixml -luriparser -lXinerama -Wl,--as-needed -Wl,--gc-sections -lstdc++fs -no-pie
 
